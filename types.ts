@@ -2,6 +2,15 @@ import React from 'react';
 
 export type BusinessType = 'fnb' | 'retail';
 
+export interface Outlet {
+  id: string;
+  name: string;
+  address: string;
+  isOpen: boolean;
+  type: string;
+  storeId?: string; // Optional reference
+}
+
 export interface ProductOption {
   id: string;
   name: string;
@@ -33,7 +42,7 @@ export interface Product {
   stock?: number;
   discount?: number;
   collection?: string;
-  
+
   // Deprecated fields kept for type safety if needed, but we will rely on optionGroups
   sizes?: number;
   variants?: any[];
@@ -85,7 +94,10 @@ export interface PaymentSummary {
 
 export interface ShiftData {
   isOpen: boolean;
+  shiftId?: string;
   cashierName: string;
+  cashierId?: string;
+  registerName?: string;
   startTime?: Date;
   startCash: number;
   expectedCash: number;
