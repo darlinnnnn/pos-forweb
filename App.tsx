@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import Header from './components/Header';
+import Login from './components/Login';
+import OutletSelector from './components/OutletSelector';
 import CategoryPills from './components/CategoryPills';
 import ProductCard from './components/ProductCard';
 import CartSidebar from './components/CartSidebar';
@@ -12,20 +14,43 @@ import ControlCenter from './components/ControlCenter';
 import KitchenPreviewModal from './components/KitchenPreviewModal';
 import { products as initialProducts, tables as initialTables, initialCategoryGroups, initialDiscounts } from './data';
 import { Product, CartItem, Table, ShiftData, SelectedOption, BusinessType, DiscountState, CategoryGroup, DiscountRule, PrinterDevice } from './types';
-import { Search, ScanLine, ArrowLeft, Lock, ShoppingBag } from 'lucide-react';
+import { Search, ScanLine, ArrowLeft, ShoppingBag, LayoutGrid, List } from 'lucide-react';
 
 function App() {
+  // Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [selectedOutlet, setSelectedOutlet] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<{email: string; storeName: string} | null>(null);
+
+  // App UI State
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [businessType, setBusinessType] = useState<BusinessType>('fnb');
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
+  // Multi-outlet Mock Data
+  const mockOutlets = [
+    { id: 'out-1', name: 'Downtown Hub', address: 'Jl. Sudirman No. 45, Jakarta Selatan', isOpen: true, type: 'Flagship Store' },
+    { id: 'out-2', name: 'Seaside Pavilion', address: 'Beachfront Road Block B, North Jakarta', isOpen: true, type: 'Cafe Express' },
+    { id: 'out-3', name: 'Terrace Garden', address: 'Level 5 Rooftop, Mall Senayan, Jakarta', isOpen: false, type: 'Signature Dining' },
+  ];
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 1024);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [theme]);
 
   const [categoryGroups, setCategoryGroups] = useState<CategoryGroup[]>(initialCategoryGroups);
   const [discounts, setDiscounts] = useState<DiscountRule[]>(initialDiscounts);
@@ -43,13 +68,15 @@ function App() {
   const [orderType, setOrderType] = useState<'dine-in' | 'take-away' | 'delivery'>('dine-in');
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
 
+  // Default shift to CLOSED for mandatory open flow
   const [shiftData, setShiftData] = useState<ShiftData>({
-    isOpen: true,
+    isOpen: false,
     cashierName: 'Sarah J.',
-    startCash: 500000,
-    expectedCash: 3500000,
+    startCash: 0,
+    expectedCash: 0,
   });
 
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
   const [selectedProductForVariant, setSelectedProductForVariant] = useState<Product | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -59,6 +86,28 @@ function App() {
   const [lastKitchenOrderId, setLastKitchenOrderId] = useState('');
   const [kitchenOrderItems, setKitchenOrderItems] = useState<CartItem[]>([]);
   const [activeKitchenPrinters, setActiveKitchenPrinters] = useState<{name: string, width?: '58mm' | '80mm'}[]>([]);
+
+  const handleLogin = (email: string, storeName: string) => {
+    setCurrentUser({ email, storeName });
+    setIsAuthenticated(true);
+    // Initial cashier name set but shift still closed
+    setShiftData(prev => ({ ...prev, cashierName: email.split('@')[0].toUpperCase() }));
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setSelectedOutlet(null);
+    setCurrentUser(null);
+    setCartItems([]);
+    setSelectedTable(null);
+    setIsSideMenuOpen(false);
+    setShiftData(prev => ({ ...prev, isOpen: false }));
+  };
+
+  const handleSelectOutlet = (outlet: any) => {
+    setSelectedOutlet(outlet);
+    // After outlet selection, we don't automatically open shift, the flow handles it
+  };
 
   const showTableSelector = businessType === 'fnb' && orderType === 'dine-in' && !selectedTable;
 
@@ -138,7 +187,11 @@ function App() {
 
   const handleAddTable = (newTable: Table) => setTables((prev) => [...prev, newTable]);
   const handleDeleteTable = (tableId: string) => { setTables((prev) => prev.filter((t) => t.id !== tableId)); if (selectedTable?.id === tableId) setSelectedTable(null); };
-  const handleShiftUpdate = (updatedData: Partial<ShiftData>) => { setShiftData(prev => ({ ...prev, ...updatedData })); setIsShiftModalOpen(false); setIsSideMenuOpen(false); };
+  const handleShiftUpdate = (updatedData: Partial<ShiftData>) => { 
+    setShiftData(prev => ({ ...prev, ...updatedData })); 
+    setIsShiftModalOpen(false); 
+    setIsSideMenuOpen(false); 
+  };
   
   const handleChangeBusinessType = (type: BusinessType) => {
     setBusinessType(type);
@@ -163,7 +216,6 @@ function App() {
     clearCart();
   };
 
-  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const cartTotalItems = cartItems.reduce((acc, item) => acc + item.quantity, 0);
 
   const subtotal = cartItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
@@ -173,43 +225,106 @@ function App() {
   const tax = (subtotal - totalDiscount) * 0.11;
   const finalTotal = subtotal - totalDiscount + tax;
 
+  // Flow: Login -> Outlet Select -> Mandatory Open Shift -> Dashboard
+  if (!isAuthenticated) {
+    return <Login onLogin={handleLogin} />;
+  }
+
+  if (isAuthenticated && !selectedOutlet) {
+    return (
+        <OutletSelector 
+            outlets={mockOutlets} 
+            onSelect={handleSelectOutlet} 
+            onBack={() => setIsAuthenticated(false)} 
+            storeName={currentUser?.storeName || 'ElegantPOS'} 
+        />
+    );
+  }
+
+  // Mandatory Open Shift Screen
+  if (isAuthenticated && selectedOutlet && !shiftData.isOpen) {
+    return (
+        <div className="h-screen w-full bg-slate-950 flex flex-col items-center justify-center p-4">
+            <ShiftModal 
+                isOpen={true} 
+                onClose={() => setSelectedOutlet(null)} 
+                shiftData={shiftData} 
+                onConfirmShift={handleShiftUpdate}
+                isInitial={true}
+            />
+        </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-slate-950 text-slate-200 overflow-hidden text-[13px] md:text-sm">
+    <div className="flex flex-col lg:flex-row h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 overflow-hidden text-[13px] md:text-sm transition-colors duration-500 animate-in fade-in duration-700">
       <div className="flex-1 flex flex-col min-w-0 relative h-full">
-        <Header shiftData={shiftData} onOpenControlCenter={() => setIsSideMenuOpen(true)} />
-        <main className="flex-1 overflow-hidden flex flex-col relative bg-slate-950">
+        <Header shiftData={shiftData} storeName={`${currentUser?.storeName} - ${selectedOutlet?.name}`} onOpenControlCenter={() => setIsSideMenuOpen(true)} />
+        <main className="flex-1 overflow-hidden flex flex-col relative bg-slate-50 dark:bg-slate-950 transition-colors">
           {showTableSelector ? (
             <TableSelector tables={tables} onSelectTable={handleTableSelect} onAddTable={handleAddTable} onDeleteTable={handleDeleteTable} />
           ) : (
             <>
-              <div className="p-4 md:p-6 pb-2 shrink-0 z-10 bg-slate-950/95 backdrop-blur-md sticky top-0">
+              <div className="p-4 md:p-6 pb-2 shrink-0 z-10 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur-md sticky top-0 border-b border-slate-200 dark:border-slate-800/50">
                 <div className="flex flex-col gap-4">
                   <div className="flex gap-2">
                     {businessType === 'fnb' && orderType === 'dine-in' && selectedTable && (
-                       <button onClick={handleReselectTable} className="flex items-center justify-center w-12 h-12 md:w-14 md:h-14 bg-slate-800 border border-slate-700 text-slate-300 rounded-2xl hover:bg-slate-700 transition-all shadow-sm shrink-0"><ArrowLeft size={20} /></button>
+                       <button onClick={handleReselectTable} className="flex items-center justify-center w-12 h-12 md:w-14 md:h-14 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-all shadow-sm shrink-0"><ArrowLeft size={20} /></button>
                     )}
                     <div className="relative w-full group">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-primary-500 transition-colors"><Search className="w-5 h-5" /></div>
-                      <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full h-12 md:h-14 bg-slate-900 border border-slate-800 text-white rounded-2xl pl-12 pr-14 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 placeholder:text-slate-700 font-medium text-lg" placeholder="Search menu items..." />
-                      <div className="absolute inset-y-0 right-0 pr-2 flex items-center"><button className="p-2 text-slate-500 hover:text-white transition-colors bg-slate-800/50 rounded-xl"><ScanLine className="w-5 h-5" /></button></div>
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 dark:text-slate-500 group-focus-within:text-primary-500 transition-colors"><Search className="w-5 h-5" /></div>
+                      <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full h-12 md:h-14 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-2xl pl-12 pr-14 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 placeholder:text-slate-300 dark:placeholder:text-slate-700 font-medium text-lg transition-all shadow-sm dark:shadow-none" placeholder="Search menu items..." />
+                      <div className="absolute inset-y-0 right-0 pr-2 flex items-center"><button className="p-2 text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors bg-slate-100 dark:bg-slate-800/50 rounded-xl"><ScanLine className="w-5 h-5" /></button></div>
                     </div>
                   </div>
-                  <CategoryPills activeCategory={activeCategory} onSelectCategory={setActiveCategory} categoryGroups={categoryGroups} />
+                  
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <CategoryPills activeCategory={activeCategory} onSelectCategory={setActiveCategory} categoryGroups={categoryGroups} />
+                    </div>
+                    <div className="flex bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1 rounded-2xl shrink-0 shadow-sm dark:shadow-none">
+                        <button 
+                          onClick={() => setViewMode('grid')}
+                          className={`size-10 md:size-12 rounded-xl flex items-center justify-center transition-all ${viewMode === 'grid' ? 'bg-primary-500 text-slate-950 shadow-lg' : 'text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-300'}`}
+                        >
+                            <LayoutGrid size={20} />
+                        </button>
+                        <button 
+                          onClick={() => setViewMode('list')}
+                          className={`size-10 md:size-12 rounded-xl flex items-center justify-center transition-all ${viewMode === 'list' ? 'bg-primary-500 text-slate-950 shadow-lg' : 'text-slate-400 dark:text-slate-500 hover:text-slate-900 dark:hover:text-slate-300'}`}
+                        >
+                            <List size={20} />
+                        </button>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto p-4 md:p-6 pt-2">
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 pb-24 lg:pb-20">
-                  {filteredProducts.map((product) => ( <ProductCard key={product.id} product={product} onAdd={handleProductClick} /> ))}
+                <div className={`
+                    grid gap-3 pb-24 lg:pb-20
+                    ${viewMode === 'grid' 
+                        ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5' 
+                        : 'grid-cols-1'
+                    }
+                `}>
+                  {filteredProducts.map((product) => ( 
+                    <ProductCard 
+                      key={product.id} 
+                      product={product} 
+                      onAdd={handleProductClick} 
+                      viewMode={viewMode}
+                    /> 
+                  ))}
                 </div>
               </div>
             </>
           )}
         </main>
-        {isMobile && <div className="absolute bottom-6 right-6 z-30"><button onClick={() => setIsMobileCartOpen(true)} className="relative w-16 h-16 bg-primary-500 rounded-full shadow-lg shadow-primary-500/30 text-slate-900 flex items-center justify-center hover:bg-primary-400 active:scale-95"><ShoppingBag size={28} />{cartTotalItems > 0 && <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full text-white text-xs font-bold flex items-center justify-center border-2 border-slate-950">{cartTotalItems}</span>}</button></div>}
+        {isMobile && <div className="absolute bottom-6 right-6 z-30"><button onClick={() => setIsMobileCartOpen(true)} className="relative w-16 h-16 bg-primary-500 rounded-full shadow-lg shadow-primary-500/30 text-slate-900 flex items-center justify-center hover:bg-primary-400 active:scale-95 transition-transform"><ShoppingBag size={28} />{cartTotalItems > 0 && <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full text-white text-xs font-bold flex items-center justify-center border-2 border-slate-50 dark:border-slate-950 transition-colors">{cartTotalItems}</span>}</button></div>}
       </div>
       
       <div className={`fixed inset-0 z-50 lg:static lg:z-auto lg:h-screen lg:flex lg:flex-col transition-transform duration-300 ${isMobile ? (isMobileCartOpen ? 'translate-x-0' : 'translate-x-full') : 'translate-x-0'}`}>
-        {isMobile && isMobileCartOpen && <div className="absolute inset-0 bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setIsMobileCartOpen(false)}></div>}
+        {isMobile && isMobileCartOpen && <div className="absolute inset-0 bg-black/40 dark:bg-black/60 backdrop-blur-sm lg:hidden transition-colors" onClick={() => setIsMobileCartOpen(false)}></div>}
         <div className="relative h-full flex flex-col w-full">
             <CartSidebar 
                 cartItems={cartItems} 
@@ -233,7 +348,16 @@ function App() {
         </div>
       </div>
 
-      <ControlCenter isOpen={isSideMenuOpen} onClose={() => setIsSideMenuOpen(false)} shiftData={shiftData} onOpenShiftModal={() => { setIsSideMenuOpen(false); setIsShiftModalOpen(true); }} onOpenSettings={() => { setIsSideMenuOpen(false); setIsSettingsOpen(true); }} />
+      <ControlCenter 
+        isOpen={isSideMenuOpen} 
+        onClose={() => setIsSideMenuOpen(false)} 
+        shiftData={shiftData} 
+        onOpenShiftModal={() => { setIsSideMenuOpen(false); setIsShiftModalOpen(true); }} 
+        onOpenSettings={() => { setIsSideMenuOpen(false); setIsSettingsOpen(true); }}
+        theme={theme}
+        onToggleTheme={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+        onLogout={handleLogout}
+      />
       <ShiftModal isOpen={isShiftModalOpen} onClose={() => setIsShiftModalOpen(false)} shiftData={shiftData} onConfirmShift={handleShiftUpdate} />
       <VariantModal isOpen={isVariantModalOpen} onClose={() => setIsVariantModalOpen(false)} product={selectedProductForVariant} onAddToCart={addToCart} />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} businessType={businessType} onChangeBusinessType={handleChangeBusinessType} categoryGroups={categoryGroups} onUpdateCategoryGroups={setCategoryGroups} discounts={discounts} onUpdateDiscounts={setDiscounts} printers={printers} onUpdatePrinters={setPrinters} />

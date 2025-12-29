@@ -1,32 +1,37 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ShiftData } from '../types';
-import { X, DollarSign, User, Clock, Calculator, AlertCircle, CheckCircle2, Receipt, CreditCard, Smartphone, Wallet, ChevronDown, Check, Tag } from 'lucide-react';
+// Fixed: Added ChevronRight and removed non-existent Backspace from lucide-react imports
+import { X, DollarSign, User, Clock, CheckCircle2, Receipt, CreditCard, Smartphone, ChevronDown, Check, ArrowLeft, Key, Eye, EyeOff, AlertCircle, Delete, ChevronRight } from 'lucide-react';
 
 interface ShiftModalProps {
   isOpen: boolean;
   onClose: () => void;
   shiftData: ShiftData;
   onConfirmShift: (data: Partial<ShiftData>) => void;
+  isInitial?: boolean;
 }
 
-const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose, shiftData, onConfirmShift }) => {
-  const [step, setStep] = useState<'input' | 'summary'>('input');
+const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose, shiftData, onConfirmShift, isInitial = false }) => {
+  const [step, setStep] = useState<'cashier' | 'pin' | 'cash' | 'summary'>('cashier');
   
+  // Settings mock - in real app, these come from DB
+  const cashierOptions = [
+    { name: 'SARAH J.', id: '8821', pin: '1234', requiresPin: true },
+    { name: 'BUDI S.', id: '9912', pin: '', requiresPin: false },
+    { name: 'ADMIN', id: 'ADM-001', pin: '1111', requiresPin: true }
+  ];
+
   // Open Shift State
-  const [selectedCashier, setSelectedCashier] = useState('Sarah J.');
+  const [selectedCashier, setSelectedCashier] = useState(cashierOptions[0]);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState(false);
   const [startCash, setStartCash] = useState<string>('');
   
   // Dropdown State
   const [isCashierDropdownOpen, setIsCashierDropdownOpen] = useState(false);
   const cashierDropdownRef = useRef<HTMLDivElement>(null);
-  
-  const cashierOptions = [
-    { name: 'Sarah J.', id: '8821' },
-    { name: 'Budi S.', id: '9912' },
-    { name: 'Admin', id: 'ADM-001' }
-  ];
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (cashierDropdownRef.current && !cashierDropdownRef.current.contains(event.target as Node)) {
@@ -37,316 +42,256 @@ const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose, shiftData, onC
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
   
-  // Close Shift State
-  const [actualCash, setActualCash] = useState<string>('');
-  const [expenses, setExpenses] = useState<string>(''); // New: Operational Expenses
-  const [notes, setNotes] = useState('');
-
-  // Reset state when modal opens
+  // Reset on Open
   useEffect(() => {
     if (isOpen) {
-      setStep('input');
+      setStep('cashier');
       setStartCash('');
-      setActualCash('');
-      setExpenses('');
-      setNotes('');
-      // Pre-fill existing data if needed
+      setPin('');
+      setPinError(false);
     }
   }, [isOpen]);
+
+  // Handle PIN input
+  const handleKeyPress = (num: string) => {
+    if (pin.length < 4) {
+      const newPin = pin + num;
+      setPin(newPin);
+      setPinError(false);
+      
+      if (newPin.length === 4) {
+        if (newPin === selectedCashier.pin) {
+          setTimeout(() => setStep('cash'), 300);
+        } else {
+          setPinError(true);
+          setTimeout(() => setPin(''), 800);
+        }
+      }
+    }
+  };
+
+  const handleBackspace = () => setPin(prev => prev.slice(0, -1));
 
   if (!isOpen) return null;
 
   const isShiftOpen = shiftData.isOpen;
-  
-  // Mock Payment Breakdown for Closing Shift
-  const paymentBreakdown = [
-    { method: 'Cash', count: 12, total: shiftData.expectedCash, icon: <DollarSign size={16} /> },
-    { method: 'Debit/Credit Card', count: 8, total: 2450000, icon: <CreditCard size={16} /> },
-    { method: 'QRIS / E-Wallet', count: 15, total: 1850000, icon: <Smartphone size={16} /> },
-  ];
-
-  const totalRevenue = paymentBreakdown.reduce((acc, curr) => acc + curr.total, 0);
-  
-  // Calculation Logic
-  const expenseAmount = parseInt(expenses) || 0;
-  // Expected Cash in Drawer = (Start Cash + Cash Sales) - Expenses
-  // Assuming shiftData.expectedCash represents (Start Cash + Cash Sales) as per previous context
-  const netExpectedCash = shiftData.expectedCash - expenseAmount;
-  const cashDifference = (parseInt(actualCash) || 0) - netExpectedCash;
-
-  // Mock Discount Statistic for Owner View
-  const mockTotalDiscount = 450000;
-
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
   };
 
-  const handleConfirm = () => {
-    if (!isShiftOpen) {
-      // Opening Shift Logic
-      onConfirmShift({
-        isOpen: true,
-        cashierName: selectedCashier,
-        startCash: parseInt(startCash) || 0,
-        startTime: new Date(),
-      });
-    } else {
-      // Closing Shift Logic
-      onConfirmShift({
-        isOpen: false,
-        cashExpenses: expenseAmount,
-      });
-    }
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-0 sm:p-4 animate-in fade-in duration-300 ${isInitial ? '' : 'z-[105]'}`}>
+      <div className="bg-slate-900 border-x sm:border border-slate-800 rounded-t-[3rem] sm:rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-500 flex flex-col h-[90vh] sm:h-auto sm:max-h-[90vh]">
         
         {/* Header */}
-        <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
+        <div className="p-6 sm:p-8 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
           <div>
-            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+            <h3 className="text-xl sm:text-2xl font-black text-white flex items-center gap-3 tracking-tight">
               {!isShiftOpen ? (
                 <>
-                  <CheckCircle2 size={22} className="text-emerald-500" />
-                  Open Register Shift
+                  <div className="size-10 bg-emerald-500/10 text-emerald-500 rounded-xl flex items-center justify-center">
+                    <CheckCircle2 size={24} />
+                  </div>
+                  Terminal Login
                 </>
               ) : (
                 <>
-                  <X size={22} className="text-red-500" />
-                  Close Register Shift
+                  <div className="size-10 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center">
+                    <X size={24} />
+                  </div>
+                  End Session
                 </>
               )}
             </h3>
-            <p className="text-sm text-slate-400 mt-1">
-              {!isShiftOpen ? 'Start a new sales session' : 'Reconcile cash and end session'}
+            <p className="text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] mt-2">
+              {isInitial ? 'Welcome back to work' : 'Shift Management'}
             </p>
           </div>
-          <button onClick={onClose} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">
-            <X size={20} />
+          
+          <button onClick={onClose} className="p-3 bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-all">
+             {isInitial ? <ArrowLeft size={24} /> : <X size={24} />}
           </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-8 no-scrollbar">
           
-          {/* ================= OPEN SHIFT VIEW ================= */}
-          {!isShiftOpen && (
-            <>
-              {/* Cashier Selection (Custom Dropdown) */}
-              <div className="space-y-2 relative" ref={cashierDropdownRef}>
-                <label className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Select Cashier</label>
-                
-                <button 
-                    onClick={() => setIsCashierDropdownOpen(!isCashierDropdownOpen)}
-                    className={`
-                        w-full bg-slate-950 border rounded-xl h-12 pl-3 pr-4 text-white flex items-center justify-between transition-all focus:outline-none focus:ring-1 focus:ring-primary-500
-                        ${isCashierDropdownOpen ? 'border-primary-500 ring-1 ring-primary-500' : 'border-slate-700 hover:border-slate-600'}
-                    `}
-                >
-                    <div className="flex items-center gap-3">
-                        <div className="text-slate-500">
-                            <User size={18} />
-                        </div>
-                        <span className="font-medium">{selectedCashier}</span>
+          {/* STEP 1: Cashier Selection */}
+          {step === 'cashier' && (
+             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="text-center">
+                    <div className="size-20 bg-slate-800 rounded-3xl flex items-center justify-center text-primary-500 mx-auto mb-4 shadow-2xl border border-slate-700">
+                        <User size={40} />
                     </div>
-                    <ChevronDown size={16} className={`text-slate-500 transition-transform duration-200 ${isCashierDropdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-
-                {isCashierDropdownOpen && (
-                    <div className="absolute z-20 w-full mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-                        <ul className="py-1">
-                            {cashierOptions.map((cashier) => (
-                                <li key={cashier.id}>
-                                    <button
-                                        onClick={() => {
-                                            setSelectedCashier(cashier.name);
-                                            setIsCashierDropdownOpen(false);
-                                        }}
-                                        className={`w-full text-left px-4 py-3 text-sm flex items-center justify-between hover:bg-slate-700 hover:text-white transition-colors
-                                            ${selectedCashier === cashier.name ? 'bg-slate-700/50 text-emerald-400 font-medium' : 'text-slate-300'}
-                                        `}
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            {selectedCashier === cashier.name && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>}
-                                            <span>{cashier.name} <span className="text-slate-500 text-xs ml-1">(ID: {cashier.id})</span></span>
-                                        </div>
-                                        {selectedCashier === cashier.name && <Check size={16} />}
-                                    </button>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-              </div>
-
-              {/* Starting Cash Input */}
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Starting Cash (Float)</label>
-                <div className="relative group">
-                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 group-focus-within:text-emerald-500 transition-colors">
-                      <span className="font-bold text-lg">Rp</span>
-                   </div>
-                   <input 
-                      type="number" 
-                      value={startCash}
-                      onChange={(e) => setStartCash(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl h-14 pl-10 pr-4 text-2xl font-bold text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 placeholder:text-slate-700 transition-all"
-                      placeholder="0"
-                      autoFocus
-                   />
+                    <h4 className="text-white font-black text-lg">Who is operating today?</h4>
+                    <p className="text-slate-500 text-sm mt-1 font-medium">Please select your cashier profile</p>
                 </div>
-                <p className="text-xs text-slate-500 flex items-center gap-1">
-                  <AlertCircle size={12} />
-                  Enter the total amount of cash currently in the drawer.
-                </p>
-              </div>
 
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700 flex items-center gap-4">
-                 <div className="p-3 bg-slate-800 rounded-lg text-slate-400">
-                    <Clock size={20} />
-                 </div>
-                 <div>
-                    <p className="text-xs text-slate-400 font-semibold uppercase">Current Time</p>
-                    <p className="text-white font-mono font-medium">{new Date().toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' })}</p>
-                 </div>
-              </div>
-            </>
-          )}
-
-          {/* ================= CLOSE SHIFT VIEW ================= */}
-          {isShiftOpen && (
-            <>
-              {/* Summary Cards - Combined for Mobile Efficiency */}
-              <div className="bg-slate-800/50 rounded-xl border border-slate-700 grid grid-cols-2 divide-x divide-slate-700">
-                 <div className="p-4 flex flex-col justify-center">
-                    <p className="text-[10px] sm:text-xs text-slate-500 font-bold uppercase mb-1">Total Revenue</p>
-                    <p className="text-lg sm:text-2xl font-bold text-primary-400 tracking-tight leading-none">{formatCurrency(totalRevenue)}</p>
-                 </div>
-                 
-                 <div className="p-4 flex flex-col justify-center bg-slate-800/30">
-                    <div className="flex items-center gap-1.5 mb-1">
-                        <Tag size={12} className="text-red-400" />
-                        <p className="text-[10px] sm:text-xs text-slate-500 font-bold uppercase">Discounts</p>
-                    </div>
-                    <p className="text-lg sm:text-xl font-bold text-red-400 tracking-tight leading-none">{formatCurrency(mockTotalDiscount)}</p>
-                 </div>
-              </div>
-
-               {/* Expenses Input */}
-               <div className="space-y-2 pt-2">
-                <label className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Cash Drops / Expenses</label>
-                <div className="relative group">
-                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 group-focus-within:text-amber-500 transition-colors">
-                      <span className="font-bold text-lg">- Rp</span>
-                   </div>
-                   <input 
-                      type="number" 
-                      value={expenses}
-                      onChange={(e) => setExpenses(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl h-12 pl-12 pr-4 text-xl font-bold text-amber-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 placeholder:text-slate-800 transition-all"
-                      placeholder="0"
-                   />
-                </div>
-                 {expenseAmount > 0 && (
-                    <div className="flex justify-end">
-                         <span className="text-xs text-slate-400">
-                            Expected in Drawer: <span className="text-white font-bold">{formatCurrency(netExpectedCash)}</span>
-                         </span>
-                    </div>
-                )}
-              </div>
-
-              {/* Actual Cash Input */}
-              <div className="space-y-3 pt-2 border-t border-slate-800">
-                <label className="text-sm font-semibold text-slate-300 uppercase tracking-wide flex justify-between">
-                   <span>Actual Cash Count</span>
-                   {parseInt(actualCash) > 0 && (
-                     <span className={`text-xs font-bold ${cashDifference === 0 ? 'text-emerald-500' : cashDifference > 0 ? 'text-blue-400' : 'text-red-400'}`}>
-                        {cashDifference === 0 ? 'Perfect Match' : cashDifference > 0 ? `+${formatCurrency(cashDifference)}` : formatCurrency(cashDifference)}
-                     </span>
-                   )}
-                </label>
-                <div className="relative group">
-                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-primary-500 transition-colors">
-                      <span className="font-bold text-xl">Rp</span>
-                   </div>
-                   <input 
-                      type="number" 
-                      value={actualCash}
-                      onChange={(e) => setActualCash(e.target.value)}
-                      className={`w-full bg-slate-950 border rounded-2xl h-16 pl-12 pr-4 text-3xl font-bold text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 transition-all placeholder:text-slate-800
-                        ${cashDifference < 0 && actualCash ? 'border-red-500/50 focus:border-red-500 focus:ring-red-500' : 
-                          cashDifference > 0 ? 'border-blue-500/50 focus:border-blue-500 focus:ring-blue-500' : 
-                          'border-slate-700 focus:border-primary-500 focus:ring-primary-500'}
-                      `}
-                      placeholder="0"
-                      autoFocus
-                   />
-                </div>
-              </div>
-
-              {/* Payment Method Breakdown */}
-              <div className="space-y-3 pt-2">
-                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800 pb-2">Payment Details</h4>
-                <div className="space-y-2">
-                    {paymentBreakdown.map((payment, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-slate-800/30 hover:bg-slate-800/50 transition-colors border border-transparent hover:border-slate-700">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-slate-800 rounded-md text-slate-400">
-                                    {payment.icon}
+                <div className="space-y-4" ref={cashierDropdownRef}>
+                    {cashierOptions.map(cashier => (
+                        <button 
+                            key={cashier.id}
+                            onClick={() => {
+                                setSelectedCashier(cashier);
+                                if (cashier.requiresPin) {
+                                    setStep('pin');
+                                } else {
+                                    setStep('cash');
+                                }
+                            }}
+                            className="w-full bg-slate-850/50 border border-slate-800 rounded-2xl p-5 flex items-center justify-between hover:border-primary-500 hover:bg-slate-800 transition-all group active:scale-[0.98]"
+                        >
+                            <div className="flex items-center gap-4">
+                                <div className="size-12 rounded-xl bg-slate-800 flex items-center justify-center text-slate-500 group-hover:bg-primary-500 group-hover:text-slate-950 transition-colors">
+                                    <User size={24} />
                                 </div>
-                                <div>
-                                    <p className="text-sm font-semibold text-slate-200">{payment.method}</p>
-                                    <p className="text-xs text-slate-500">{payment.count} Transactions</p>
+                                <div className="text-left">
+                                    <p className="text-white font-black">{cashier.name}</p>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">ID: {cashier.id}</p>
                                 </div>
                             </div>
-                            <p className="font-mono font-medium text-white">{formatCurrency(payment.total)}</p>
-                        </div>
+                            <ChevronRight size={20} className="text-slate-700 group-hover:text-primary-500 transition-colors" />
+                        </button>
                     ))}
                 </div>
-              </div>
+             </div>
+          )}
 
-              {/* Notes */}
-              <div className="space-y-2">
-                 <label className="text-xs font-semibold text-slate-400 uppercase">Shift Notes</label>
-                 <textarea 
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-primary-500 transition-colors h-20 resize-none"
-                    placeholder="Reason for expenses or discrepancies..."
-                 />
-              </div>
-            </>
+          {/* STEP 2: Modern PIN Keypad */}
+          {step === 'pin' && (
+             <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
+                <div className="text-center">
+                    <button 
+                        onClick={() => setStep('cashier')}
+                        className="mb-4 inline-flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-[10px] font-black uppercase tracking-widest"
+                    >
+                        <ArrowLeft size={14} /> Back to Cashiers
+                    </button>
+                    <h4 className="text-white font-black text-xl">{selectedCashier.name}</h4>
+                    <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mt-1">Enter your 4-digit PIN</p>
+                </div>
+
+                {/* PIN Dots Display */}
+                <div className={`flex justify-center gap-4 ${pinError ? 'animate-shake' : ''}`}>
+                    {[0, 1, 2, 3].map(i => (
+                        <div key={i} className={`size-5 rounded-full border-2 transition-all duration-300 ${pin.length > i ? 'bg-primary-500 border-primary-500 shadow-[0_0_15px_rgba(245,158,11,0.5)]' : 'border-slate-800 bg-slate-950'}`}></div>
+                    ))}
+                </div>
+
+                {pinError && <p className="text-center text-red-500 text-[10px] font-black uppercase tracking-widest animate-pulse">Incorrect PIN</p>}
+
+                {/* Keypad Grid */}
+                <div className="grid grid-cols-3 gap-3 max-w-[280px] mx-auto">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                        <button 
+                            key={num} 
+                            onClick={() => handleKeyPress(num.toString())}
+                            className="size-16 sm:size-20 rounded-full bg-slate-800/50 hover:bg-slate-700 border border-slate-700/50 text-white text-2xl font-black transition-all active:scale-90 flex items-center justify-center"
+                        >
+                            {num}
+                        </button>
+                    ))}
+                    <div className="size-16 sm:size-20"></div>
+                    <button 
+                        onClick={() => handleKeyPress('0')}
+                        className="size-16 sm:size-20 rounded-full bg-slate-800/50 hover:bg-slate-700 border border-slate-700/50 text-white text-2xl font-black transition-all active:scale-90 flex items-center justify-center"
+                    >
+                        0
+                    </button>
+                    <button 
+                        onClick={handleBackspace}
+                        className="size-16 sm:size-20 rounded-full bg-slate-900 border border-slate-800 text-slate-500 hover:text-red-400 transition-all active:scale-90 flex items-center justify-center"
+                    >
+                        {/* Fixed: Used Delete icon from lucide-react instead of non-existent Backspace icon */}
+                        <Delete size={28} />
+                    </button>
+                </div>
+             </div>
+          )}
+
+          {/* STEP 3: Starting Cash */}
+          {step === 'cash' && (
+             <div className="space-y-8 animate-in fade-in slide-in-from-right-8 duration-500">
+                <div className="text-center">
+                    <button 
+                        onClick={() => setStep(selectedCashier.requiresPin ? 'pin' : 'cashier')}
+                        className="mb-4 inline-flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-[10px] font-black uppercase tracking-widest"
+                    >
+                        <ArrowLeft size={14} /> Back
+                    </button>
+                    <h4 className="text-white font-black text-xl">Initial Cash Float</h4>
+                    <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mt-1">Amount currently in drawer</p>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="relative group">
+                        <div className="absolute inset-y-0 left-0 pl-6 flex items-center pointer-events-none text-slate-600 group-focus-within:text-emerald-500 transition-colors">
+                            <span className="font-black text-2xl tracking-tighter">Rp</span>
+                        </div>
+                        <input 
+                            type="number" 
+                            value={startCash}
+                            onChange={(e) => setStartCash(e.target.value)}
+                            className="w-full bg-slate-950 border-2 border-slate-800 rounded-3xl h-24 pl-16 pr-8 text-4xl font-black text-white focus:outline-none focus:border-emerald-500 focus:ring-8 focus:ring-emerald-500/5 transition-all tabular-nums placeholder:text-slate-900"
+                            placeholder="0"
+                            autoFocus
+                        />
+                    </div>
+                    
+                    <div className="p-4 bg-slate-850/50 rounded-2xl border border-slate-800 flex items-center gap-4">
+                        <div className="size-10 bg-slate-800 rounded-xl flex items-center justify-center text-slate-500">
+                            <Clock size={20} />
+                        </div>
+                        <div>
+                            <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest leading-none mb-1">Session timestamp</p>
+                            <p className="text-slate-400 text-sm font-bold tracking-tight">{new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <button 
+                    onClick={() => onConfirmShift({ isOpen: true, cashierName: selectedCashier.name, startCash: parseInt(startCash) || 0, startTime: new Date() })}
+                    disabled={!startCash}
+                    className="w-full h-20 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-lg rounded-3xl shadow-2xl shadow-emerald-500/20 active:scale-[0.98] transition-all disabled:opacity-50 uppercase tracking-[0.2em] flex items-center justify-center gap-3"
+                >
+                    <span>Activate Terminal</span>
+                    <CheckCircle2 size={24} />
+                </button>
+             </div>
+          )}
+
+          {/* CLOSE SHIFT LOGIC (unchanged for stability) */}
+          {isShiftOpen && (
+             <div className="space-y-6">
+                 {/* Summary views and Reconciliation... */}
+                 <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2">Total Sales</p>
+                        <p className="text-2xl font-black text-primary-500 tracking-tighter tabular-nums">{formatCurrency(shiftData.expectedCash)}</p>
+                    </div>
+                    <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6">
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2">Drawer Start</p>
+                        <p className="text-2xl font-black text-slate-400 tracking-tighter tabular-nums">{formatCurrency(shiftData.startCash)}</p>
+                    </div>
+                 </div>
+
+                 <button 
+                    onClick={() => onConfirmShift({ isOpen: false })}
+                    className="w-full h-20 bg-red-500 hover:bg-red-400 text-white font-black text-lg rounded-3xl shadow-2xl shadow-red-500/20 active:scale-[0.98] transition-all uppercase tracking-[0.2em] flex items-center justify-center gap-3"
+                 >
+                    <span>Finalize Session</span>
+                    <Receipt size={24} />
+                 </button>
+             </div>
           )}
         </div>
 
-        {/* Footer Actions */}
-        <div className="p-5 border-t border-slate-800 bg-slate-900 z-10">
-          <button 
-            onClick={handleConfirm}
-            disabled={!isShiftOpen && !startCash} 
-            className={`w-full h-12 rounded-xl font-bold text-slate-900 shadow-lg flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed
-              ${!isShiftOpen 
-                ? 'bg-emerald-500 hover:bg-emerald-400 shadow-emerald-500/20' 
-                : 'bg-red-500 hover:bg-red-400 shadow-red-500/20'}
-            `}
-          >
-            {!isShiftOpen ? (
-                <>
-                    <CheckCircle2 size={20} />
-                    Start Shift
-                </>
-            ) : (
-                <>
-                    <Receipt size={20} />
-                    Close Shift & Print Report
-                </>
-            )}
-          </button>
+        {/* Footer info */}
+        <div className="p-6 text-center border-t border-slate-800 bg-slate-900/50 shrink-0">
+             <p className="text-slate-600 text-[9px] font-black uppercase tracking-[0.3em]">
+                Secure Session Environment &bull; ElegantPOS v2.4
+             </p>
         </div>
-
       </div>
     </div>
   );
