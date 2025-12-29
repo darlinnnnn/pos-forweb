@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#020617" />
+    <meta name="description" content="ElegantPOS - Premium Offline-Capable Retail Management" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>ElegantPOS</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBzdHlsZT0iYmFja2dyb3VuZC1jb2xvcjogIzAyMDYxNzsiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMwMjA2MTciIC8+PHBhdGggZD0iTTQ0OCA5Nkg2NGEzMiAzMiAwIDAgMC0zMiAzMnYyNTZhMzIgMzIgMCAwIDAgMzIgMzJoMzg0YTMyIDMyIDAgMCAwIDMyLTMyVjEyOGEzMiAzMiAwIDAgMC0zMi0zMnpNMjU2IDM1MmEyNCAyNCAwIDEgMSAyNC0yNCAyNCAyNCAwIDAgMS0yNCAyNHptMTEyIDBhMjQgMjQgMCAxIDEgMjQtMjQgMjQgMjQgMCAwIDEtMjQgMjR6IiBmaWxsPSIjZjU5ZTBiIiB0cmFuc2Zvcm09InNjYWxlKDAuOCkgdHJhbnNsYXRlKDY0LDY0KSIvPjwvc3ZnPg==" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBzdHlsZT0iYmFja2dyb3VuZC1jb2xvcjogIzAyMDYxNzsiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMwMjA2MTciIC8+PHBhdGggZD0iTTQ0OCA5Nkg2NGEzMiAzMiAwIDAgMC0zMiAzMnYyNTZhMzIgMzIgMCAwIDAgMzIgMzJoMzg0YTMyIDMyIDAgMCAwIDMyLTMyVjEyOGEzMiAzMiAwIDAgMC0zMi0zMnpNMjU2IDM1MmEyNCAyNCAwIDEgMSAyNC0yNCAyNCAyNCAwIDAgMS0yNCAyNHptMTEyIDBhMjQgMjQgMCAxIDEgMjQtMjQgMjQgMjQgMCAwIDEtMjQgMjR6IiBmaWxsPSIjZjU5ZTBiIiB0cmFuc2Zvcm09InNjYWxlKDAuOCkgdHJhbnNsYXRlKDY0LDY0KSIvPjwvc3ZnPg==" />
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Plus Jakarta Sans', 'sans-serif'],
+            },
+            colors: {
+              primary: {
+                400: '#fbbf24', // Gold
+                500: '#f59e0b', // Amber
+                600: '#d97706',
+              },
+              slate: {
+                850: '#151e2e', // Custom surface
+                950: '#020617', // Custom background
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #334155;
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #475569;
+      }
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+
+      /* Hide Spin Buttons for Number Inputs */
+      input::-webkit-outer-spin-button,
+      input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      input[type=number] {
+        -moz-appearance: textfield;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+</head>
+  <body class="bg-slate-950 text-slate-200 antialiased overflow-hidden selection:bg-primary-500 selection:text-white">
+    <div id="root"></div>
+    <!-- Entry point for React/Vite -->
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

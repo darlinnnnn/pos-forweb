@@ -1,0 +1,113 @@
+import React from 'react';
+
+export type BusinessType = 'fnb' | 'retail';
+
+export interface ProductOption {
+  id: string;
+  name: string;
+  price: number;
+}
+
+export interface OptionGroup {
+  id: string;
+  name: string; // e.g., "Size", "Toppings", "Sugar Level"
+  min: number; // 0 = Optional, 1 = Required
+  max: number; // 1 = Single Select, >1 = Multi Select
+  options: ProductOption[];
+}
+
+export interface SelectedOption extends ProductOption {
+  groupId: string;
+  groupName: string;
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  price: number;
+  image: string;
+  category: string;
+  optionGroups?: OptionGroup[]; // New Flexible System
+  badge?: string;
+  stock?: number;
+  discount?: number;
+  collection?: string;
+  
+  // Deprecated fields kept for type safety if needed, but we will rely on optionGroups
+  sizes?: number;
+  variants?: any[];
+  addons?: any[];
+}
+
+export interface CartItem extends Product {
+  cartId: string;
+  quantity: number;
+  selectedOptions: SelectedOption[]; // Stores all choices (Size, Toppings, etc.)
+  notes?: string;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  icon?: React.ReactNode; // Optional because we might create new ones without icons easily
+}
+
+export interface CategoryGroup {
+  id: string;
+  name: string;
+  categories: Category[];
+}
+
+export interface Table {
+  id: string;
+  name: string;
+  status: 'available' | 'occupied' | 'reserved';
+  seats: number;
+  section: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  type: 'walk-in' | 'member' | 'vip';
+  phone?: string;
+  email?: string;
+}
+
+export interface PaymentSummary {
+  method: string;
+  count: number;
+  total: number;
+}
+
+export interface ShiftData {
+  isOpen: boolean;
+  cashierName: string;
+  startTime?: Date;
+  startCash: number;
+  expectedCash: number;
+  paymentMethods?: PaymentSummary[];
+  cashExpenses?: number;
+}
+
+export interface DiscountRule {
+  id: string;
+  name: string;
+  type: 'nominal' | 'percent';
+  value: number;
+}
+
+export interface DiscountState {
+  type: 'nominal' | 'percent';
+  value: number;
+  name?: string; // Optional name for the applied discount
+}
+
+export interface PrinterDevice {
+  id: string;
+  name: string;
+  ip: string;
+  status: 'online' | 'offline';
+  type: 'esp32' | 'network';
+}
