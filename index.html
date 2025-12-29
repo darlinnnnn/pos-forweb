@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#020617" />
     <meta name="description" content="ElegantPOS - Premium Offline-Capable Retail Management" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -73,7 +73,20 @@
         scrollbar-width: none;
       }
 
-      /* Hide Spin Buttons for Number Inputs */
+      /* Performance Optimizations */
+      .scroll-container {
+        contain: paint;
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* GPU Accelerated Transitions */
+      .gpu-trans {
+        transform: translateZ(0);
+        will-change: transform, opacity;
+      }
+
+      /* Hide Spin Buttons */
       input::-webkit-outer-spin-button,
       input::-webkit-inner-spin-button {
         -webkit-appearance: none;
@@ -81,6 +94,14 @@
       }
       input[type=number] {
         -moz-appearance: textfield;
+      }
+
+      /* Safe area padding for mobile footers */
+      .pb-safe {
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      .mb-safe {
+        margin-bottom: env(safe-area-inset-bottom);
       }
     </style>
   <script type="importmap">
