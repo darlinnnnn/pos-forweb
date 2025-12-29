@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Table } from '../types';
-import { Users, Armchair, Settings, Plus, X, Check } from 'lucide-react';
+import { Users, Armchair, Settings, Plus, X, Check, ReceiptText } from 'lucide-react';
 
 interface TableSelectorProps {
   tables: Table[];
@@ -50,12 +50,12 @@ const TableSelector: React.FC<TableSelectorProps> = ({ tables, onSelectTable, on
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-8 bg-slate-950 relative">
+    <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-950 relative">
       <div className="max-w-5xl mx-auto">
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-bold text-white">Select a Table</h2>
-              <p className="text-slate-400 mt-1">Choose an available table to start the order.</p>
+              <h2 className="text-2xl font-bold text-white tracking-tight">Table Management</h2>
+              <p className="text-slate-400 mt-1">Select an active table or start a new order.</p>
             </div>
             
             <div className="flex items-center gap-3">
@@ -78,7 +78,7 @@ const TableSelector: React.FC<TableSelectorProps> = ({ tables, onSelectTable, on
                  }`}
                >
                  {isEditing ? <Check size={16} /> : <Settings size={16} />}
-                 {isEditing ? 'Done Editing' : 'Manage Tables'}
+                 {isEditing ? 'Manage Layout' : 'Table Settings'}
                </button>
             </div>
         </div>
@@ -86,11 +86,12 @@ const TableSelector: React.FC<TableSelectorProps> = ({ tables, onSelectTable, on
         <div className="flex flex-col gap-10">
           {Object.entries(sections).map(([sectionName, sectionTables]) => (
             <div key={sectionName}>
-              <h3 className="text-sm font-bold text-primary-500 uppercase tracking-widest mb-4 flex items-center gap-2 after:h-px after:flex-1 after:bg-slate-800 after:ml-4">
+              <h3 className="text-xs font-black text-slate-600 uppercase tracking-[0.2em] mb-4 flex items-center gap-4">
                 {sectionName}
+                <div className="h-px flex-1 bg-slate-800"></div>
               </h3>
               
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                 {(sectionTables as Table[]).map((table) => {
                   const isAvailable = table.status === 'available';
                   const isOccupied = table.status === 'occupied';
@@ -99,52 +100,54 @@ const TableSelector: React.FC<TableSelectorProps> = ({ tables, onSelectTable, on
                   return (
                     <div key={table.id} className="relative group">
                       <button
-                        disabled={!isAvailable && !isEditing}
-                        onClick={() => !isEditing && isAvailable && onSelectTable(table)}
+                        disabled={isReserved && !isEditing}
+                        onClick={() => !isEditing && onSelectTable(table)}
                         className={`
-                          w-full relative h-32 rounded-2xl border-2 flex flex-col items-center justify-center gap-2 transition-all duration-300
-                          ${isEditing ? 'cursor-default border-dashed' : ''}
+                          w-full relative h-32 rounded-3xl border-2 flex flex-col items-center justify-center gap-2 transition-all duration-300
+                          ${isEditing ? 'cursor-default border-dashed' : 'cursor-pointer'}
                           ${!isEditing && isAvailable 
-                            ? 'bg-slate-900 border-slate-800 hover:border-primary-500 hover:bg-slate-800 hover:shadow-[0_0_20px_rgba(245,158,11,0.15)] hover:-translate-y-1 cursor-pointer' 
+                            ? 'bg-slate-900 border-slate-800 hover:border-primary-500 hover:bg-slate-800 hover:shadow-[0_0_20px_rgba(245,158,11,0.15)] hover:-translate-y-1' 
                             : ''}
                           ${!isEditing && isOccupied 
-                            ? 'bg-slate-900/40 border-slate-800/50 opacity-60 cursor-not-allowed' 
+                            ? 'bg-primary-500/5 border-primary-500 shadow-lg shadow-primary-500/5 hover:-translate-y-1' 
                             : ''}
                           ${!isEditing && isReserved 
-                            ? 'bg-slate-900 border-amber-900/50 cursor-not-allowed' 
+                            ? 'bg-slate-900 border-amber-900/50 opacity-50 cursor-not-allowed' 
                             : ''}
                           ${isEditing ? 'bg-slate-900 border-slate-700' : ''}
                         `}
                       >
                         {/* Status Indicator */}
                         {!isEditing && (
-                          <div className={`absolute top-3 right-3 w-2 h-2 rounded-full ${
+                          <div className={`absolute top-4 right-4 w-2 h-2 rounded-full ${
                             isAvailable ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
-                            isOccupied ? 'bg-slate-600' : 'bg-amber-500'
+                            isOccupied ? 'bg-primary-500 animate-pulse' : 'bg-amber-500'
                           }`}></div>
                         )}
 
                         <div className={`
-                          p-3 rounded-full mb-1 transition-colors
-                          ${!isEditing && isAvailable ? 'bg-slate-800 text-slate-300 group-hover:bg-primary-500 group-hover:text-slate-900' : 'bg-slate-800/50 text-slate-600'}
+                          p-3 rounded-2xl mb-1 transition-colors
+                          ${!isEditing && isAvailable ? 'bg-slate-800 text-slate-400 group-hover:bg-primary-500 group-hover:text-slate-950' : ''}
+                          ${!isEditing && isOccupied ? 'bg-primary-500 text-slate-950' : ''}
                           ${isEditing ? 'bg-slate-800 text-slate-400' : ''}
+                          ${!isEditing && isReserved ? 'bg-slate-800/50 text-slate-600' : ''}
                         `}>
-                          <Armchair size={24} />
+                          {isOccupied ? <ReceiptText size={24} /> : <Armchair size={24} />}
                         </div>
 
                         <div className="text-center">
-                          <span className={`block text-lg font-bold leading-none ${isAvailable || isEditing ? 'text-white' : 'text-slate-500'}`}>
+                          <span className={`block text-lg font-bold leading-none ${isOccupied ? 'text-primary-400' : 'text-white'}`}>
                             {table.name}
                           </span>
-                          <div className="flex items-center justify-center gap-1 mt-1 text-xs font-medium text-slate-500">
+                          <div className="flex items-center justify-center gap-1 mt-1 text-[10px] font-bold text-slate-500 uppercase tracking-tighter">
                              <Users size={10} />
-                             <span>{table.seats} Seats</span>
+                             <span>{table.seats} Pax</span>
                           </div>
                         </div>
 
-                        {!isEditing && isReserved && (
-                          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold text-amber-500 uppercase tracking-wide">
-                              Reserved
+                        {isOccupied && !isEditing && (
+                          <div className="absolute -bottom-2 bg-primary-500 text-slate-950 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-tighter shadow-md">
+                              Active Order
                           </div>
                         )}
                       </button>
@@ -167,7 +170,7 @@ const TableSelector: React.FC<TableSelectorProps> = ({ tables, onSelectTable, on
         </div>
       </div>
 
-      {/* Add Table Modal */}
+      {/* Add Table Modal (unchanged) */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
@@ -201,7 +204,7 @@ const TableSelector: React.FC<TableSelectorProps> = ({ tables, onSelectTable, on
                         >
                             {uniqueSections.map(s => <option key={s} value={s}>{s}</option>)}
                             <option value="Outdoor">Outdoor</option>
-                            <option value="Bar">Bar Area</option>
+                            <option value="Bar Area">Bar Area</option>
                         </select>
                     </div>
                     <div className="space-y-2">

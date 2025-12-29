@@ -45,6 +45,7 @@ export interface CartItem extends Product {
   quantity: number;
   selectedOptions: SelectedOption[]; // Stores all choices (Size, Toppings, etc.)
   notes?: string;
+  isUnsent?: boolean; // Track if item needs to be sent to kitchen
 }
 
 export interface Category {
@@ -65,6 +66,7 @@ export interface Table {
   status: 'available' | 'occupied' | 'reserved';
   seats: number;
   section: string;
+  activeOrder?: CartItem[];
 }
 
 export interface Customer {
@@ -110,4 +112,8 @@ export interface PrinterDevice {
   ip: string;
   status: 'online' | 'offline';
   type: 'esp32' | 'network';
+  copies?: number;
+  printTypes?: ('receipt' | 'kitchen' | 'order')[];
+  isActive?: boolean;
+  paperWidth?: '58mm' | '80mm';
 }

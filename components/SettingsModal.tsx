@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Utensils, ShoppingBag, Check, Printer, Wifi, RefreshCw, Smartphone, Laptop, Menu, Edit2, Save, Tag, Trash2, Plus } from 'lucide-react';
+import { X, Utensils, ShoppingBag, Check, Printer, Wifi, RefreshCw, Smartphone, Laptop, Menu, Edit2, Save, Tag, Trash2, Plus, ChevronRight, Cpu, Radio, Activity, Copy, Sliders, ChevronLeft, Power, Ruler } from 'lucide-react';
 import { BusinessType, PrinterDevice, CategoryGroup, DiscountRule } from '../types';
 
 interface SettingsModalProps {
@@ -11,6 +11,8 @@ interface SettingsModalProps {
   onUpdateCategoryGroups?: (groups: CategoryGroup[]) => void;
   discounts?: DiscountRule[];
   onUpdateDiscounts?: (discounts: DiscountRule[]) => void;
+  printers?: PrinterDevice[];
+  onUpdatePrinters?: (printers: PrinterDevice[]) => void;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ 
@@ -21,34 +23,26 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   categoryGroups = [],
   onUpdateCategoryGroups,
   discounts = [],
-  onUpdateDiscounts
+  onUpdateDiscounts,
+  printers = [],
+  onUpdatePrinters
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'hardware' | 'menu' | 'promotions'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'menu' | 'promotions' | 'hardware'>('general');
   const [isScanning, setIsScanning] = useState(false);
-  const [foundDevices, setFoundDevices] = useState<PrinterDevice[]>([]);
-  const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(null);
-
-  // Menu Management State
-  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-  const [editingCatId, setEditingCatId] = useState<string | null>(null);
-  const [tempName, setTempName] = useState('');
-
-  // Discount Management State
-  const [isAddingDiscount, setIsAddingDiscount] = useState(false);
-  const [newDiscount, setNewDiscount] = useState<Partial<DiscountRule>>({ name: '', type: 'percent', value: 0 });
+  const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(printers.find(p => p.isActive)?.id || null);
+  const [editingPrinter, setEditingPrinter] = useState<PrinterDevice | null>(null);
 
   if (!isOpen) return null;
 
   const handleScan = () => {
     setIsScanning(true);
-    setFoundDevices([]); // Clear previous
-    
-    // Simulate Network Scan
     setTimeout(() => {
-        setFoundDevices([
-            { id: 'esp-001', name: 'ESP32-Thermal-A', ip: '192.168.1.105', status: 'online', type: 'esp32' },
-            { id: 'net-002', name: 'Kitchen-Printer-01', ip: '192.168.1.200', status: 'online', type: 'network' }
-        ]);
+        const discovered: PrinterDevice[] = [
+            { id: 'esp-001', name: 'Thermal-POS-Front', ip: '192.168.1.105', status: 'online', type: 'esp32', copies: 1, printTypes: ['receipt'], isActive: true, paperWidth: '80mm' },
+            { id: 'net-002', name: 'Kitchen-Order-Printer', ip: '192.168.1.200', status: 'online', type: 'network', copies: 1, printTypes: ['kitchen'], isActive: true, paperWidth: '80mm' },
+            { id: 'esp-003', name: 'Bar-Thermal-Unit', ip: '192.168.1.110', status: 'offline', type: 'esp32', copies: 1, printTypes: ['receipt'], isActive: false, paperWidth: '58mm' }
+        ];
+        onUpdatePrinters?.(discovered);
         setIsScanning(false);
     }, 2000);
   };
@@ -57,409 +51,201 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       setConnectedDeviceId(id);
   };
 
-  // Menu Logic
-  const handleStartEditGroup = (id: string, currentName: string) => {
-      setEditingGroupId(id);
-      setEditingCatId(null);
-      setTempName(currentName);
+  const handleTogglePrinterActive = (printerId: string) => {
+      if (!onUpdatePrinters) return;
+      onUpdatePrinters(printers.map(p => p.id === printerId ? { ...p, isActive: !p.isActive } : p));
   };
 
-  const handleSaveGroup = (id: string) => {
-      if (onUpdateCategoryGroups) {
-          const newGroups = categoryGroups.map(g => 
-              g.id === id ? { ...g, name: tempName } : g
-          );
-          onUpdateCategoryGroups(newGroups);
-      }
-      setEditingGroupId(null);
+  const handleSavePrinterSettings = (printer: PrinterDevice) => {
+    onUpdatePrinters?.(printers.map(d => d.id === printer.id ? printer : d));
+    setEditingPrinter(null);
   };
 
-  const handleStartEditCat = (id: string, currentName: string) => {
-      setEditingCatId(id);
-      setEditingGroupId(null);
-      setTempName(currentName);
+  const togglePrintType = (printer: PrinterDevice, type: 'receipt' | 'kitchen' | 'order') => {
+      const current = printer.printTypes || [];
+      const updated = current.includes(type) 
+        ? current.filter(t => t !== type) 
+        : [...current, type];
+      setEditingPrinter({ ...printer, printTypes: updated as any });
   };
 
-  const handleSaveCat = (groupId: string, catId: string) => {
-      if (onUpdateCategoryGroups) {
-          const newGroups = categoryGroups.map(g => {
-              if (g.id === groupId) {
-                  return {
-                      ...g,
-                      categories: g.categories.map(c => c.id === catId ? { ...c, name: tempName } : c)
-                  };
-              }
-              return g;
-          });
-          onUpdateCategoryGroups(newGroups);
-      }
-      setEditingCatId(null);
+  const handleUpdateCopies = (printer: PrinterDevice, delta: number) => {
+      const current = printer.copies || 1;
+      setEditingPrinter({ ...printer, copies: Math.max(1, current + delta) });
   };
 
-  // Discount Logic
-  const handleAddDiscount = () => {
-      if (!newDiscount.name || !newDiscount.value || !onUpdateDiscounts) return;
-      const newRule: DiscountRule = {
-          id: `disc-${Date.now()}`,
-          name: newDiscount.name,
-          type: newDiscount.type || 'percent',
-          value: Number(newDiscount.value)
-      };
-      onUpdateDiscounts([...discounts, newRule]);
-      setIsAddingDiscount(false);
-      setNewDiscount({ name: '', type: 'percent', value: 0 });
-  };
-
-  const handleDeleteDiscount = (id: string) => {
-      if (onUpdateDiscounts) {
-          onUpdateDiscounts(discounts.filter(d => d.id !== id));
-      }
-  };
+  const tabs = [
+    { id: 'general', label: 'General', icon: <Smartphone size={16} /> },
+    { id: 'menu', label: 'Menu', icon: <Menu size={16} /> },
+    { id: 'promotions', label: 'Promos', icon: <Tag size={16} /> },
+    { id: 'hardware', label: 'Hardware', icon: <Cpu size={16} /> },
+  ];
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-0 sm:p-4">
+      <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom sm:zoom-in-95 duration-300 flex flex-col h-full sm:h-auto sm:max-h-[85vh]">
         
-        {/* Header */}
-        <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
+        <div className="p-5 md:p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 shrink-0">
           <div>
-            <h3 className="text-xl font-bold text-white">Settings</h3>
-            <p className="text-sm text-slate-400">Manage application preferences</p>
+            <h3 className="text-xl font-bold text-white tracking-tight">System Settings</h3>
+            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mt-0.5">Terminal Configuration</p>
           </div>
-          <button onClick={onClose} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">
-            <X size={20} />
-          </button>
+          <button onClick={onClose} className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-white transition-all active:scale-90"><X size={24} /></button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-slate-800 bg-slate-900/50 px-6 gap-6 overflow-x-auto">
-            {['general', 'menu', 'promotions', 'hardware'].map((tab) => (
+        <div className="flex bg-slate-900/80 border-b border-slate-800 overflow-x-auto no-scrollbar px-4 sm:px-6 shrink-0">
+            {tabs.map((tab) => (
                 <button 
-                    key={tab}
-                    onClick={() => setActiveTab(tab as any)}
-                    className={`py-4 text-sm font-bold border-b-2 transition-colors whitespace-nowrap capitalize ${activeTab === tab ? 'text-primary-500 border-primary-500' : 'text-slate-400 border-transparent hover:text-white'}`}
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`relative flex items-center gap-2.5 py-4 px-4 text-sm font-bold transition-all whitespace-nowrap ${activeTab === tab.id ? 'text-primary-500' : 'text-slate-500 hover:text-slate-300'}`}
                 >
-                    {tab}
+                    {tab.icon} {tab.label}
+                    {activeTab === tab.id && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500 rounded-full animate-in fade-in duration-300"></div>}
                 </button>
             ))}
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          
-          {/* GENERAL TAB */}
+        <div className="flex-1 overflow-y-auto p-5 md:p-8">
           {activeTab === 'general' && (
-            <div className="animate-in slide-in-from-right-4 duration-300">
-                <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Application Type</h4>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* FnB Option */}
-                    <button
-                    onClick={() => onChangeBusinessType('fnb')}
-                    className={`
-                        relative p-5 rounded-2xl border-2 text-left transition-all duration-300 group
-                        ${businessType === 'fnb' 
-                        ? 'bg-slate-800 border-primary-500 shadow-[0_0_20px_rgba(245,158,11,0.1)]' 
-                        : 'bg-slate-900 border-slate-700 hover:bg-slate-800 hover:border-slate-600'}
-                    `}
-                    >
-                    <div className={`
-                        w-12 h-12 rounded-xl flex items-center justify-center mb-4 transition-colors
-                        ${businessType === 'fnb' ? 'bg-primary-500 text-slate-900' : 'bg-slate-800 text-slate-400 group-hover:bg-slate-700'}
-                    `}>
-                        <Utensils size={24} />
-                    </div>
-                    
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <h5 className={`text-lg font-bold mb-1 ${businessType === 'fnb' ? 'text-white' : 'text-slate-300'}`}>
-                                Food & Beverage
-                            </h5>
-                            <p className="text-sm text-slate-500 leading-relaxed">
-                                Complete features for restaurants and cafes. Includes <strong>Table Management</strong>, <strong>Dine-in</strong>, <strong>Take-away</strong>, and <strong>Delivery</strong> options.
-                            </p>
+            <div className="animate-in slide-in-from-right-4 duration-300 space-y-6">
+                <div className="grid grid-cols-1 gap-4">
+                    <button onClick={() => onChangeBusinessType('fnb')} className={`relative p-6 rounded-2xl border-2 text-left transition-all ${businessType === 'fnb' ? 'bg-primary-500/5 border-primary-500' : 'bg-slate-800/40 border-slate-800 hover:bg-slate-800'}`}>
+                        <div className="flex gap-5 items-start">
+                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${businessType === 'fnb' ? 'bg-primary-500 text-slate-950' : 'bg-slate-800 text-slate-500'}`}><Utensils size={28} /></div>
+                            <div className="flex-1"><h5 className="text-lg font-bold mb-1">Food & Beverage</h5><p className="text-sm text-slate-500 leading-snug">Dining, tables, & modifiers.</p></div>
                         </div>
-                        {businessType === 'fnb' && (
-                            <div className="absolute top-4 right-4 text-primary-500">
-                                <Check size={20} strokeWidth={3} />
-                            </div>
-                        )}
-                    </div>
                     </button>
-
-                    {/* Retail Option */}
-                    <button
-                    onClick={() => onChangeBusinessType('retail')}
-                    className={`
-                        relative p-5 rounded-2xl border-2 text-left transition-all duration-300 group
-                        ${businessType === 'retail' 
-                        ? 'bg-slate-800 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.1)]' 
-                        : 'bg-slate-900 border-slate-700 hover:bg-slate-800 hover:border-slate-600'}
-                    `}
-                    >
-                    <div className={`
-                        w-12 h-12 rounded-xl flex items-center justify-center mb-4 transition-colors
-                        ${businessType === 'retail' ? 'bg-emerald-500 text-slate-900' : 'bg-slate-800 text-slate-400 group-hover:bg-slate-700'}
-                    `}>
-                        <ShoppingBag size={24} />
-                    </div>
-                    
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <h5 className={`text-lg font-bold mb-1 ${businessType === 'retail' ? 'text-white' : 'text-slate-300'}`}>
-                                Retail Shop
-                            </h5>
-                            <p className="text-sm text-slate-500 leading-relaxed">
-                                Streamlined for retail stores. Optimized for quick sales with <strong>No Tables</strong> and simplified checkout process.
-                            </p>
+                    <button onClick={() => onChangeBusinessType('retail')} className={`relative p-6 rounded-2xl border-2 text-left transition-all ${businessType === 'retail' ? 'bg-emerald-500/5 border-emerald-500' : 'bg-slate-800/40 border-slate-800 hover:bg-slate-800'}`}>
+                        <div className="flex gap-5 items-start">
+                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${businessType === 'retail' ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-500'}`}><ShoppingBag size={28} /></div>
+                            <div className="flex-1"><h5 className="text-lg font-bold mb-1">Retail & Goods</h5><p className="text-sm text-slate-500 leading-snug">Fast scans & simple inventory.</p></div>
                         </div>
-                        {businessType === 'retail' && (
-                            <div className="absolute top-4 right-4 text-emerald-500">
-                                <Check size={20} strokeWidth={3} />
-                            </div>
-                        )}
-                    </div>
                     </button>
                 </div>
             </div>
           )}
 
-          {/* MENU MANAGEMENT TAB */}
-          {activeTab === 'menu' && (
-              <div className="animate-in slide-in-from-right-4 duration-300">
-                  <div className="flex justify-between items-center mb-6">
-                      <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Collection Structure</h4>
-                      <button className="text-xs text-primary-500 font-bold hover:text-primary-400">+ Add Group</button>
-                  </div>
-
-                  <div className="space-y-6">
-                      {categoryGroups.map((group) => (
-                          <div key={group.id} className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
-                              {/* Group Header */}
-                              <div className="p-3 bg-slate-800/50 flex items-center justify-between group">
-                                  {editingGroupId === group.id ? (
-                                      <div className="flex-1 flex gap-2">
-                                          <input 
-                                            value={tempName}
-                                            onChange={(e) => setTempName(e.target.value)}
-                                            className="bg-slate-900 border border-slate-700 rounded px-2 text-sm text-white focus:outline-none focus:border-primary-500"
-                                            autoFocus
-                                          />
-                                          <button onClick={() => handleSaveGroup(group.id)} className="p-1 bg-primary-500 text-slate-900 rounded hover:bg-primary-400">
-                                              <Save size={16} />
-                                          </button>
-                                      </div>
-                                  ) : (
-                                      <div className="flex items-center gap-2">
-                                          <Menu size={16} className="text-slate-500" />
-                                          <h5 className="font-bold text-white text-sm">{group.name}</h5>
-                                          <button 
-                                            onClick={() => handleStartEditGroup(group.id, group.name)}
-                                            className="p-1 text-slate-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                                          >
-                                              <Edit2 size={12} />
-                                          </button>
-                                      </div>
-                                  )}
-                              </div>
-                              
-                              {/* Categories List */}
-                              <div className="p-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  {group.categories.map((cat) => (
-                                      <div key={cat.id} className="flex items-center justify-between p-2 rounded bg-slate-900 border border-slate-800 hover:border-slate-700 group">
-                                          {editingCatId === cat.id ? (
-                                              <div className="flex-1 flex gap-2">
-                                                  <input 
-                                                    value={tempName}
-                                                    onChange={(e) => setTempName(e.target.value)}
-                                                    className="w-full bg-slate-800 border border-slate-600 rounded px-2 text-xs text-white focus:outline-none focus:border-primary-500"
-                                                    autoFocus
-                                                  />
-                                                  <button onClick={() => handleSaveCat(group.id, cat.id)} className="p-1 bg-emerald-500 text-white rounded hover:bg-emerald-400">
-                                                      <Save size={14} />
-                                                  </button>
-                                              </div>
-                                          ) : (
-                                              <>
-                                                <div className="flex items-center gap-2">
-                                                    <div className="text-slate-500">{cat.icon}</div>
-                                                    <span className="text-sm text-slate-300">{cat.name}</span>
-                                                </div>
-                                                <button 
-                                                    onClick={() => handleStartEditCat(cat.id, cat.name)}
-                                                    className="p-1 text-slate-600 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                                                >
-                                                    <Edit2 size={12} />
-                                                </button>
-                                              </>
-                                          )}
-                                      </div>
-                                  ))}
-                              </div>
-                          </div>
-                      ))}
-                  </div>
-              </div>
-          )}
-
-          {/* PROMOTIONS TAB */}
-          {activeTab === 'promotions' && (
-              <div className="animate-in slide-in-from-right-4 duration-300">
-                   <div className="flex justify-between items-center mb-6">
-                      <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Named Discounts</h4>
-                      <button 
-                        onClick={() => setIsAddingDiscount(true)}
-                        className="text-xs text-primary-500 font-bold hover:text-primary-400 bg-primary-500/10 px-3 py-1.5 rounded-lg border border-primary-500/20 flex items-center gap-2"
-                      >
-                          <Plus size={14} /> Add Promotion
-                      </button>
-                  </div>
-
-                  {isAddingDiscount && (
-                      <div className="mb-6 bg-slate-800/50 border border-primary-500/50 rounded-xl p-4 space-y-3">
-                           <h5 className="text-sm font-bold text-white">New Promotion Rule</h5>
-                           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                               <input 
-                                  placeholder="Promotion Name (e.g. Summer Sale)"
-                                  value={newDiscount.name}
-                                  onChange={e => setNewDiscount({...newDiscount, name: e.target.value})}
-                                  className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary-500"
-                               />
-                               <select
-                                  value={newDiscount.type}
-                                  onChange={e => setNewDiscount({...newDiscount, type: e.target.value as 'percent' | 'nominal'})}
-                                  className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary-500"
-                               >
-                                   <option value="percent">Percentage (%)</option>
-                                   <option value="nominal">Nominal (Rp)</option>
-                               </select>
-                               <input 
-                                  type="number"
-                                  placeholder="Value"
-                                  value={newDiscount.value}
-                                  onChange={e => setNewDiscount({...newDiscount, value: Number(e.target.value)})}
-                                  className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary-500"
-                               />
-                           </div>
-                           <div className="flex justify-end gap-2 mt-2">
-                               <button onClick={() => setIsAddingDiscount(false)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-white">Cancel</button>
-                               <button onClick={handleAddDiscount} className="px-3 py-1.5 bg-primary-500 text-slate-900 text-xs font-bold rounded-lg hover:bg-primary-400">Save Rule</button>
-                           </div>
-                      </div>
-                  )}
-
-                  <div className="space-y-3">
-                      {discounts.length === 0 ? (
-                          <div className="text-center py-8 bg-slate-900/50 rounded-xl border border-slate-800 border-dashed">
-                              <Tag size={32} className="mx-auto text-slate-600 mb-2" />
-                              <p className="text-slate-500">No discount rules found.</p>
-                          </div>
-                      ) : (
-                          discounts.map(discount => (
-                              <div key={discount.id} className="flex items-center justify-between p-4 bg-slate-900 border border-slate-800 rounded-xl">
-                                  <div className="flex items-center gap-3">
-                                      <div className="p-2 bg-slate-800 rounded-lg text-emerald-500">
-                                          <Tag size={18} />
-                                      </div>
-                                      <div>
-                                          <h5 className="font-bold text-white text-sm">{discount.name}</h5>
-                                          <p className="text-xs text-slate-500">
-                                              {discount.type === 'percent' ? `${discount.value}% Off` : `Rp ${discount.value.toLocaleString()} Off`}
-                                          </p>
-                                      </div>
-                                  </div>
-                                  <button 
-                                    onClick={() => handleDeleteDiscount(discount.id)}
-                                    className="p-2 text-slate-600 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"
-                                  >
-                                      <Trash2 size={16} />
-                                  </button>
-                              </div>
-                          ))
-                      )}
-                  </div>
-              </div>
-          )}
-
-          {/* HARDWARE TAB */}
           {activeTab === 'hardware' && (
              <div className="animate-in slide-in-from-right-4 duration-300 space-y-6">
-                 
-                 <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6">
-                    <div className="flex justify-between items-start mb-6">
+                 <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-center sm:text-left">
                          <div>
-                             <h4 className="text-lg font-bold text-white flex items-center gap-2">
-                                <Printer size={20} className="text-primary-500" />
-                                Printer Configuration
+                             <h4 className="text-lg font-bold text-white flex items-center gap-2 justify-center sm:justify-start">
+                                <Printer size={20} className="text-primary-500" /> Printer Network
                              </h4>
-                             <p className="text-sm text-slate-400 mt-1">Connect ESP32 or Network Printers via LAN</p>
+                             <p className="text-sm text-slate-500 mt-1">Thermal & Label Printing Management</p>
                          </div>
-                         <button 
-                            onClick={handleScan}
-                            disabled={isScanning}
-                            className="px-4 py-2 bg-primary-500 hover:bg-primary-400 text-slate-900 font-bold rounded-lg shadow-lg shadow-primary-500/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-all"
-                         >
-                             <RefreshCw size={18} className={isScanning ? 'animate-spin' : ''} />
-                             {isScanning ? 'Scanning...' : 'Scan Devices'}
+                         <button onClick={handleScan} disabled={isScanning} className={`w-full sm:w-auto px-6 h-12 rounded-xl font-bold flex items-center justify-center gap-3 transition-all ${isScanning ? 'bg-slate-800 text-slate-500' : 'bg-primary-500 text-slate-950 shadow-lg shadow-primary-500/20'}`}>
+                             {isScanning ? <Activity size={18} className="animate-pulse" /> : <RefreshCw size={18} />}
+                             {isScanning ? 'Scanning...' : 'Refresh Devices'}
                          </button>
-                    </div>
-
-                    {/* Scan Results */}
-                    <div className="space-y-3">
-                        {isScanning && foundDevices.length === 0 && (
-                            <div className="text-center py-8">
-                                <div className="inline-block animate-pulse text-primary-500 mb-2">
-                                    <Wifi size={32} />
-                                </div>
-                                <p className="text-slate-400 font-medium">Searching for ESP32 devices on local network...</p>
-                            </div>
-                        )}
-
-                        {!isScanning && foundDevices.length === 0 && (
-                            <div className="text-center py-8 bg-slate-900/50 rounded-xl border border-slate-800 border-dashed">
-                                <p className="text-slate-500">No devices found. Ensure your ESP32 is powered on and connected to WiFi.</p>
-                            </div>
-                        )}
-
-                        {foundDevices.map(device => (
-                            <div key={device.id} className="flex items-center justify-between p-4 bg-slate-900 border border-slate-700 rounded-xl hover:border-slate-600 transition-colors">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-slate-800 rounded-lg text-slate-300">
-                                        {device.type === 'esp32' ? <Printer size={20} /> : <Laptop size={20} />}
-                                    </div>
-                                    <div>
-                                        <h5 className="font-bold text-white text-sm">{device.name}</h5>
-                                        <div className="flex items-center gap-2 mt-0.5">
-                                            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">{device.ip}</span>
-                                            <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-wide">Online</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                {connectedDeviceId === device.id ? (
-                                    <button className="px-3 py-1.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-lg text-sm font-bold flex items-center gap-2 cursor-default">
-                                        <Check size={14} /> Connected
-                                    </button>
-                                ) : (
-                                    <button 
-                                        onClick={() => handleConnect(device.id)}
-                                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-bold border border-slate-600 transition-colors"
-                                    >
-                                        Connect
-                                    </button>
-                                )}
-                            </div>
-                        ))}
                     </div>
                  </div>
 
+                 <div className="space-y-4">
+                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">Detected Devices</h4>
+                    {!isScanning && printers.map(device => {
+                        const isConnected = connectedDeviceId === device.id;
+                        const isActive = device.isActive;
+                        return (
+                            <div key={device.id} className={`p-4 sm:p-5 rounded-2xl border transition-all ${isActive ? 'bg-slate-800/40 border-slate-800' : 'bg-slate-950 border-slate-900 opacity-60'} ${isConnected && isActive ? 'ring-2 ring-primary-500/30 border-primary-500/50' : ''}`}>
+                                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                    <div className="flex items-center gap-4">
+                                        <div className={`p-3.5 rounded-xl border shrink-0 transition-all ${isActive ? (isConnected ? 'bg-primary-500 text-slate-950 border-primary-400' : 'bg-slate-900 text-slate-500 border-slate-800') : 'bg-slate-900 text-slate-700 border-slate-800'}`}><Printer size={24} /></div>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <h5 className={`font-bold text-sm ${isActive ? 'text-white' : 'text-slate-500'}`}>{device.name}</h5>
+                                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tight bg-slate-700 text-slate-300`}>{device.paperWidth || '80mm'}</span>
+                                            </div>
+                                            <p className="text-[10px] font-mono text-slate-500 mt-1">{device.ip}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex w-full sm:w-auto gap-2">
+                                        <button onClick={() => setEditingPrinter(device)} className="flex-1 sm:flex-none h-10 px-4 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-slate-300 hover:bg-slate-800 transition-all flex items-center justify-center gap-2"><Sliders size={14} /> Configure</button>
+                                        <button onClick={() => handleConnect(device.id)} className={`flex-1 sm:flex-none h-10 px-6 rounded-lg text-xs font-black uppercase tracking-wider transition-all ${isConnected && isActive ? 'bg-emerald-500 text-slate-950' : 'bg-primary-500 text-slate-950'}`}>{isConnected && isActive ? 'Active' : 'Connect'}</button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                 </div>
              </div>
           )}
-
         </div>
+
+        {editingPrinter && (
+            <div className="absolute inset-0 z-50 bg-slate-900 animate-in slide-in-from-right duration-300 flex flex-col h-full">
+                <div className="p-5 md:p-6 border-b border-slate-800 flex items-center gap-4 bg-slate-900/80 backdrop-blur-md sticky top-0">
+                    <button onClick={() => setEditingPrinter(null)} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-all"><ChevronLeft size={20}/></button>
+                    <div className="flex-1">
+                        <h4 className="text-lg font-bold text-white leading-tight">Printer Configuration</h4>
+                        <p className="text-xs text-slate-500 font-mono mt-0.5">{editingPrinter.ip}</p>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                    {/* Paper Width Selection */}
+                    <div className="space-y-4">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"><Ruler size={14}/> Paper Width</label>
+                        <div className="grid grid-cols-2 gap-3">
+                            {['58mm', '80mm'].map((width) => (
+                                <button 
+                                    key={width}
+                                    onClick={() => setEditingPrinter({...editingPrinter, paperWidth: width as any})}
+                                    className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-1 ${editingPrinter.paperWidth === width ? 'bg-primary-500/10 border-primary-500 text-primary-400' : 'bg-slate-800/50 border-slate-700 text-slate-500 hover:border-slate-500'}`}
+                                >
+                                    <span className="text-lg font-black">{width}</span>
+                                    <span className="text-[10px] font-bold uppercase">{width === '58mm' ? 'Small / Mobile' : 'Standard POS'}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"><Copy size={14}/> Auto-Print Copies</label>
+                        <div className="flex items-center justify-between p-4 bg-slate-950 border border-slate-700 rounded-2xl">
+                             <p className="text-sm text-slate-300">Receipts per transaction.</p>
+                             <div className="flex items-center gap-4 bg-slate-800 p-1 rounded-xl border border-slate-700 shadow-lg">
+                                 <button onClick={() => handleUpdateCopies(editingPrinter, -1)} className="size-10 flex items-center justify-center bg-slate-900 text-slate-400 hover:text-white rounded-lg transition-all active:scale-90"><Minus size={18}/></button>
+                                 <span className="w-8 text-center text-xl font-black text-primary-500 tabular-nums">{editingPrinter.copies || 1}</span>
+                                 <button onClick={() => handleUpdateCopies(editingPrinter, 1)} className="size-10 flex items-center justify-center bg-slate-900 text-slate-400 hover:text-white rounded-lg transition-all active:scale-90"><Plus size={18}/></button>
+                             </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
+                        <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Receipt Allocation</label>
+                        <div className="grid grid-cols-1 gap-3">
+                            {[
+                                { id: 'receipt', name: 'Customer Receipt' },
+                                { id: 'kitchen', name: 'Kitchen Order' },
+                                { id: 'order', name: 'Checker / Runner' }
+                            ].map(type => {
+                                const isSelected = editingPrinter.printTypes?.includes(type.id as any);
+                                return (
+                                    <button key={type.id} onClick={() => togglePrintType(editingPrinter, type.id as any)} className={`w-full p-4 rounded-xl border-2 text-left transition-all flex items-center justify-between ${isSelected ? 'bg-primary-500/10 border-primary-500' : 'bg-slate-900/50 border-slate-800 hover:bg-slate-700'}`}>
+                                        <h5 className={`font-bold text-sm ${isSelected ? 'text-white' : 'text-slate-400'}`}>{type.name}</h5>
+                                        <div className={`size-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-primary-500 border-primary-500 text-slate-950' : 'border-slate-700'}`}>{isSelected && <Check size={12} strokeWidth={4}/>}</div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-6 border-t border-slate-800 bg-slate-900/80 backdrop-blur-md">
+                     <button onClick={() => handleSavePrinterSettings(editingPrinter)} className="w-full h-14 bg-primary-500 hover:bg-primary-400 text-slate-950 font-black rounded-2xl shadow-xl shadow-primary-500/10 active:scale-95 transition-all flex items-center justify-center gap-2"><Save size={20}/> Save Configuration</button>
+                </div>
+            </div>
+        )}
       </div>
     </div>
   );
 };
+
+const Minus = ({ size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+);
 
 export default SettingsModal;

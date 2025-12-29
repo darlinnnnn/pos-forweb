@@ -8,16 +8,16 @@ import ShiftModal from './components/ShiftModal';
 import VariantModal from './components/VariantModal';
 import SettingsModal from './components/SettingsModal';
 import CheckoutModal from './components/CheckoutModal';
-import { products, tables as initialTables, initialCategoryGroups, initialDiscounts } from './data';
-import { Product, CartItem, Table, ShiftData, SelectedOption, BusinessType, DiscountState, CategoryGroup, DiscountRule } from './types';
+import ControlCenter from './components/ControlCenter';
+import KitchenPreviewModal from './components/KitchenPreviewModal';
+import { products as initialProducts, tables as initialTables, initialCategoryGroups, initialDiscounts } from './data';
+import { Product, CartItem, Table, ShiftData, SelectedOption, BusinessType, DiscountState, CategoryGroup, DiscountRule, PrinterDevice } from './types';
 import { Search, ScanLine, ArrowLeft, Lock, ShoppingBag } from 'lucide-react';
 
 function App() {
-  // App Settings State
-  const [businessType, setBusinessType] = useState<BusinessType>('fnb');
+  const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-
-  // Responsive State
+  const [businessType, setBusinessType] = useState<BusinessType>('fnb');
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
 
@@ -31,402 +31,222 @@ function App() {
   const [discounts, setDiscounts] = useState<DiscountRule[]>(initialDiscounts);
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [printers, setPrinters] = useState<PrinterDevice[]>([
+    { id: 'net-002', name: 'Kitchen-Printer', ip: '192.168.1.200', status: 'online', type: 'network', copies: 1, printTypes: ['kitchen'], isActive: true, paperWidth: '80mm' },
+    { id: 'esp-001', name: 'Front-POS', ip: '192.168.1.105', status: 'online', type: 'esp32', copies: 1, printTypes: ['receipt'], isActive: true, paperWidth: '80mm' },
+  ]);
   
-  // Cart State
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [globalDiscount, setGlobalDiscount] = useState<DiscountState>({ type: 'nominal', value: 0 });
-  
-  // State for Table and Order Logic
   const [tables, setTables] = useState<Table[]>(initialTables);
   const [orderType, setOrderType] = useState<'dine-in' | 'take-away' | 'delivery'>('dine-in');
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
 
-  // Shift Management State
-  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const [shiftData, setShiftData] = useState<ShiftData>({
     isOpen: true,
     cashierName: 'Sarah J.',
     startCash: 500000,
-    expectedCash: 3500000, // Mocked expected cash (start + cash sales)
+    expectedCash: 3500000,
   });
 
-  // Variant Modal State
   const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
   const [selectedProductForVariant, setSelectedProductForVariant] = useState<Product | null>(null);
-
-  // Checkout Modal State
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
 
-  // Determine which view to show
+  // Kitchen Preview State
+  const [isKitchenPreviewOpen, setIsKitchenPreviewOpen] = useState(false);
+  const [lastKitchenOrderId, setLastKitchenOrderId] = useState('');
+  const [kitchenOrderItems, setKitchenOrderItems] = useState<CartItem[]>([]);
+  const [activeKitchenPrinters, setActiveKitchenPrinters] = useState<{name: string, width?: '58mm' | '80mm'}[]>([]);
+
   const showTableSelector = businessType === 'fnb' && orderType === 'dine-in' && !selectedTable;
 
-  // Filter products
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
       const matchesCategory = activeCategory === 'all' || product.category === activeCategory;
-      const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            product.sku.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) || product.sku.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesCategory && matchesSearch;
     });
-  }, [activeCategory, searchQuery]);
+  }, [products, activeCategory, searchQuery]);
 
-  // Handle Product Click
   const handleProductClick = (product: Product) => {
-    if (!shiftData.isOpen) {
-      setIsShiftModalOpen(true);
-      return;
-    }
-
-    const hasOptions = (product.optionGroups && product.optionGroups.length > 0) || 
-                       (product.variants && product.variants.length > 0) || 
-                       (product.addons && product.addons.length > 0);
-
-    if (hasOptions) {
-        setSelectedProductForVariant(product);
-        setIsVariantModalOpen(true);
-    } else {
-        addToCart(product, [], 1, '');
-    }
+    if (!shiftData.isOpen) { setIsShiftModalOpen(true); return; }
+    const hasOptions = (product.optionGroups && product.optionGroups.length > 0);
+    if (hasOptions) { setSelectedProductForVariant(product); setIsVariantModalOpen(true); } else { addToCart(product, [], 1, ''); }
   };
 
-  // Add to Cart Logic
   const addToCart = (product: Product, selectedOptions: SelectedOption[] = [], quantity: number = 1, notes: string = '') => {
     setCartItems((prev) => {
       const existing = prev.find((item) => {
          const sameProduct = item.id === product.id;
          const itemOptionIds = item.selectedOptions.map(o => o.id).sort().join(',');
          const currentOptionIds = selectedOptions.map(o => o.id).sort().join(',');
-         return sameProduct && (itemOptionIds === currentOptionIds);
+         return sameProduct && (itemOptionIds === currentOptionIds) && item.isUnsent;
       });
-
       if (existing) {
-        return prev.map((item) => {
-           if (item.cartId === existing.cartId) {
-               return { ...item, quantity: item.quantity + quantity, notes: notes || item.notes };
-           }
-           return item;
-        });
+        return prev.map((item) => (item.cartId === existing.cartId ? { ...item, quantity: item.quantity + quantity, notes: notes || item.notes, isUnsent: true } : item));
       }
-      
-      const optionsPrice = selectedOptions.reduce((sum, opt) => sum + opt.price, 0);
-      const finalPrice = product.price + optionsPrice;
-
-      return [...prev, { 
-          ...product, 
-          cartId: `${Date.now()}-${Math.random()}`, 
-          quantity, 
-          selectedOptions,
-          price: finalPrice, 
-          notes,
-          discount: 0 // Initialize explicit item discount
-      }];
+      const finalPrice = product.price + selectedOptions.reduce((sum, opt) => sum + opt.price, 0);
+      return [...prev, { ...product, cartId: `${Date.now()}-${Math.random()}`, quantity, selectedOptions, price: finalPrice, notes, discount: 0, isUnsent: true }];
     });
   };
 
-  const removeFromCart = (cartId: string) => {
-    setCartItems((prev) => prev.filter((item) => item.cartId !== cartId));
-  };
-
+  const removeFromCart = (cartId: string) => setCartItems((prev) => prev.filter((item) => item.cartId !== cartId));
   const updateQuantity = (cartId: string, delta: number) => {
-    setCartItems((prev) => {
-      return prev.map((item) => {
-        if (item.cartId === cartId) {
-          const newQty = item.quantity + delta;
-          return newQty > 0 ? { ...item, quantity: newQty } : item;
-        }
-        return item;
-      });
-    });
+    setCartItems((prev) => prev.map((item) => (item.cartId === cartId ? { ...item, quantity: Math.max(1, item.quantity + delta), isUnsent: item.isUnsent || false } : item)));
   };
-
-  // New function to update arbitrary item fields (notes, discount)
-  const updateCartItem = (cartId: string, updates: Partial<CartItem>) => {
-    setCartItems(prev => prev.map(item => item.cartId === cartId ? { ...item, ...updates } : item));
-  };
-
-  const clearCart = () => {
-      setCartItems([]);
-      setGlobalDiscount({ type: 'nominal', value: 0 });
-  };
+  const updateCartItem = (cartId: string, updates: Partial<CartItem>) => setCartItems(prev => prev.map(item => item.cartId === cartId ? { ...item, ...updates } : item));
+  const clearCart = () => { setCartItems([]); setGlobalDiscount({ type: 'nominal', value: 0 }); };
 
   const handleTableSelect = (table: Table) => {
-    if (!shiftData.isOpen) {
-        setIsShiftModalOpen(true);
-        return;
-    }
+    if (!shiftData.isOpen) { setIsShiftModalOpen(true); return; }
     setSelectedTable(table);
+    if (table.status === 'occupied' && table.activeOrder) {
+        setCartItems(table.activeOrder.map(item => ({ ...item, isUnsent: false })));
+    } else {
+        setCartItems([]);
+    }
   };
 
   const handleReselectTable = () => {
     setSelectedTable(null);
-  };
-
-  const handleAddTable = (newTable: Table) => {
-    setTables((prev) => [...prev, newTable]);
-  };
-
-  const handleDeleteTable = (tableId: string) => {
-    setTables((prev) => prev.filter((t) => t.id !== tableId));
-    if (selectedTable?.id === tableId) {
-      setSelectedTable(null);
-    }
-  };
-
-  const handleShiftUpdate = (updatedData: Partial<ShiftData>) => {
-    setShiftData(prev => ({ ...prev, ...updatedData }));
-    setIsShiftModalOpen(false);
-  };
-
-  const handleChangeBusinessType = (type: BusinessType) => {
-    setBusinessType(type);
-    if (type === 'retail') {
-        setOrderType('take-away');
-        setSelectedTable(null);
-    } else {
-        setOrderType('dine-in');
-    }
-  };
-
-  const handleUpdateCategoryGroups = (newGroups: CategoryGroup[]) => {
-      setCategoryGroups(newGroups);
-  };
-
-  // Checkout Logic
-  const handleCheckout = () => {
-    setIsCheckoutOpen(true);
-  };
-
-  const handleTransactionComplete = () => {
-    setIsCheckoutOpen(false);
     clearCart();
   };
 
+  const handleSendToKitchen = () => {
+      if (!selectedTable) return;
+      
+      const newItems = cartItems.filter(item => item.isUnsent);
+      const kitchenPrinters = printers.filter(p => p.isActive && p.printTypes?.includes('kitchen'));
+      const orderId = `K-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+      
+      if (newItems.length > 0) {
+          setLastKitchenOrderId(orderId);
+          setKitchenOrderItems(newItems);
+          setActiveKitchenPrinters(kitchenPrinters.map(p => ({name: p.name, width: p.paperWidth})));
+          setIsKitchenPreviewOpen(true);
+
+          const updatedOrder = cartItems.map(item => ({ ...item, isUnsent: false }));
+          const updatedTables = tables.map(t => t.id === selectedTable.id ? { ...t, status: 'occupied', activeOrder: updatedOrder } : t);
+          setTables(updatedTables as Table[]);
+      }
+      
+      setSelectedTable(null);
+      clearCart();
+  };
+
+  const handleAddTable = (newTable: Table) => setTables((prev) => [...prev, newTable]);
+  const handleDeleteTable = (tableId: string) => { setTables((prev) => prev.filter((t) => t.id !== tableId)); if (selectedTable?.id === tableId) setSelectedTable(null); };
+  const handleShiftUpdate = (updatedData: Partial<ShiftData>) => { setShiftData(prev => ({ ...prev, ...updatedData })); setIsShiftModalOpen(false); setIsSideMenuOpen(false); };
+  
+  const handleChangeBusinessType = (type: BusinessType) => {
+    setBusinessType(type);
+    if (type === 'retail') { setOrderType('take-away'); setSelectedTable(null); } else { setOrderType('dine-in'); }
+  };
+
+  const handleTransactionComplete = () => {
+    if (selectedTable && orderType === 'dine-in') {
+        const updatedTables = tables.map(t => t.id === selectedTable.id ? { ...t, status: 'available', activeOrder: undefined } : t);
+        setTables(updatedTables as Table[]);
+    }
+
+    const receiptPrinters = printers.filter(p => p.isActive && p.printTypes?.includes('receipt'));
+    if (receiptPrinters.length > 0) {
+        console.log("%c--- PRINTING FINAL RECEIPT ---", "color: #f59e0b; font-weight: bold;");
+        receiptPrinters.forEach(printer => {
+            for (let i = 0; i < (printer.copies || 1); i++) console.log(`%c[${printer.name}] %cRECEIPT (${printer.paperWidth}) copy ${i+1}`, "color: #fbbf24;", "color: #fff;");
+        });
+    }
+    setIsCheckoutOpen(false);
+    setSelectedTable(null);
+    clearCart();
+  };
+
+  const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const cartTotalItems = cartItems.reduce((acc, item) => acc + item.quantity, 0);
 
-  // Calculate Total for Checkout
   const subtotal = cartItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   const itemDiscounts = cartItems.reduce((acc, item) => acc + ((item.discount || 0) * item.quantity), 0);
-  const subtotalAfterItemDiscounts = subtotal - itemDiscounts;
-  const globalDiscountAmount = globalDiscount.type === 'nominal' 
-     ? globalDiscount.value 
-     : (subtotalAfterItemDiscounts * globalDiscount.value) / 100;
+  const globalDiscountAmount = globalDiscount.type === 'nominal' ? globalDiscount.value : ((subtotal - itemDiscounts) * globalDiscount.value) / 100;
   const totalDiscount = itemDiscounts + globalDiscountAmount;
-  const taxableAmount = Math.max(0, subtotal - totalDiscount);
-  const tax = taxableAmount * 0.11;
-  const finalTotal = taxableAmount + tax;
-
+  const tax = (subtotal - totalDiscount) * 0.11;
+  const finalTotal = subtotal - totalDiscount + tax;
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-slate-950 text-slate-200 overflow-hidden">
-      {/* Left Section: Header + Main Content */}
+    <div className="flex flex-col lg:flex-row h-screen bg-slate-950 text-slate-200 overflow-hidden text-[13px] md:text-sm">
       <div className="flex-1 flex flex-col min-w-0 relative h-full">
-        <Header 
-            shiftData={shiftData}
-            onOpenShiftModal={() => setIsShiftModalOpen(true)}
-            onOpenSettings={() => setIsSettingsOpen(true)}
-        />
-        
+        <Header shiftData={shiftData} onOpenControlCenter={() => setIsSideMenuOpen(true)} />
         <main className="flex-1 overflow-hidden flex flex-col relative bg-slate-950">
-          
           {showTableSelector ? (
-            <TableSelector 
-              tables={tables}
-              onSelectTable={handleTableSelect} 
-              onAddTable={handleAddTable}
-              onDeleteTable={handleDeleteTable}
-            />
+            <TableSelector tables={tables} onSelectTable={handleTableSelect} onAddTable={handleAddTable} onDeleteTable={handleDeleteTable} />
           ) : (
             <>
-              {/* Top Filter Bar */}
               <div className="p-4 md:p-6 pb-2 shrink-0 z-10 bg-slate-950/95 backdrop-blur-md sticky top-0">
-                <div className="flex flex-col gap-4 md:gap-5">
-                  
-                  {/* Search Bar & Back Button */}
-                  <div className="flex gap-2 md:gap-3">
+                <div className="flex flex-col gap-4">
+                  <div className="flex gap-2">
                     {businessType === 'fnb' && orderType === 'dine-in' && selectedTable && (
-                       <button 
-                         onClick={handleReselectTable}
-                         className="flex items-center justify-center w-12 h-12 md:w-14 md:h-14 bg-slate-800 border border-slate-700 text-slate-300 rounded-xl md:rounded-2xl hover:bg-slate-700 hover:text-white transition-all shadow-sm shrink-0"
-                         title="Back to Tables"
-                       >
-                         <ArrowLeft size={20} className="md:w-6 md:h-6" />
-                       </button>
+                       <button onClick={handleReselectTable} className="flex items-center justify-center w-12 h-12 md:w-14 md:h-14 bg-slate-800 border border-slate-700 text-slate-300 rounded-2xl hover:bg-slate-700 transition-all shadow-sm shrink-0"><ArrowLeft size={20} /></button>
                     )}
-
                     <div className="relative w-full group">
-                      <div className="absolute inset-y-0 left-0 pl-3 md:pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-primary-500 transition-colors">
-                        <Search className="w-4 h-4 md:w-5 md:h-5" />
-                      </div>
-                      <input 
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full h-12 md:h-14 bg-slate-900 border border-slate-800 text-white rounded-xl md:rounded-2xl pl-10 md:pl-12 pr-12 md:pr-14 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 placeholder:text-slate-600 transition-all font-medium text-base md:text-lg shadow-inner"
-                        placeholder="Search items..."
-                      />
-                      <div className="absolute inset-y-0 right-0 pr-2 flex items-center">
-                        <button className="p-2 text-slate-400 hover:text-white transition-colors bg-slate-800/50 rounded-lg md:rounded-xl hover:bg-slate-700">
-                          <ScanLine className="w-4 h-4 md:w-5 md:h-5" />
-                        </button>
-                      </div>
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-primary-500 transition-colors"><Search className="w-5 h-5" /></div>
+                      <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full h-12 md:h-14 bg-slate-900 border border-slate-800 text-white rounded-2xl pl-12 pr-14 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 placeholder:text-slate-700 font-medium text-lg" placeholder="Search menu items..." />
+                      <div className="absolute inset-y-0 right-0 pr-2 flex items-center"><button className="p-2 text-slate-500 hover:text-white transition-colors bg-slate-800/50 rounded-xl"><ScanLine className="w-5 h-5" /></button></div>
                     </div>
                   </div>
-
-                  {/* Categories */}
-                  <CategoryPills 
-                    activeCategory={activeCategory} 
-                    onSelectCategory={setActiveCategory}
-                    categoryGroups={categoryGroups}
-                  />
+                  <CategoryPills activeCategory={activeCategory} onSelectCategory={setActiveCategory} categoryGroups={categoryGroups} />
                 </div>
               </div>
-
-              {/* Product Grid Area */}
               <div className="flex-1 overflow-y-auto p-4 md:p-6 pt-2">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3 pb-24 lg:pb-20">
-                  {filteredProducts.map((product) => (
-                    <ProductCard 
-                      key={product.id} 
-                      product={product} 
-                      onAdd={handleProductClick} 
-                    />
-                  ))}
-                  {filteredProducts.length === 0 && (
-                    <div className="col-span-full py-20 text-center text-slate-500">
-                      <p className="text-lg">No products found.</p>
-                    </div>
-                  )}
+                  {filteredProducts.map((product) => ( <ProductCard key={product.id} product={product} onAdd={handleProductClick} /> ))}
                 </div>
               </div>
             </>
           )}
-
-           {/* Shift Closed Overlay */}
-           {!shiftData.isOpen && (
-             <div className="absolute inset-0 z-40 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-500">
-                <div className="bg-slate-900 border border-slate-700 p-8 rounded-3xl shadow-2xl max-w-md w-full text-center space-y-4 relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-500 to-red-600"></div>
-                    <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto text-slate-500 mb-2">
-                        <Lock size={40} />
-                    </div>
-                    <div>
-                        <h2 className="text-2xl font-bold text-white">Shift Closed</h2>
-                        <p className="text-slate-400 mt-2">The register is currently closed. You must open a new shift to start taking orders and processing transactions.</p>
-                    </div>
-                    <button 
-                        onClick={() => setIsShiftModalOpen(true)}
-                        className="w-full h-14 bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold rounded-xl text-lg shadow-lg shadow-emerald-500/20 transition-all active:scale-[0.98] mt-4"
-                    >
-                        Open Register Shift
-                    </button>
-                </div>
-             </div>
-           )}
-
         </main>
-        
-        {/* Mobile Floating Cart Button */}
-        {isMobile && (
-          <div className="absolute bottom-6 right-6 z-30">
-             <button 
-               onClick={() => setIsMobileCartOpen(true)}
-               className="relative w-16 h-16 bg-primary-500 rounded-full shadow-lg shadow-primary-500/30 text-slate-900 flex items-center justify-center hover:bg-primary-400 transition-transform active:scale-95"
-             >
-                <ShoppingBag size={28} strokeWidth={2.5} />
-                {cartTotalItems > 0 && (
-                  <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full text-white text-xs font-bold flex items-center justify-center border-2 border-slate-950">
-                    {cartTotalItems}
-                  </span>
-                )}
-             </button>
-          </div>
-        )}
+        {isMobile && <div className="absolute bottom-6 right-6 z-30"><button onClick={() => setIsMobileCartOpen(true)} className="relative w-16 h-16 bg-primary-500 rounded-full shadow-lg shadow-primary-500/30 text-slate-900 flex items-center justify-center hover:bg-primary-400 active:scale-95"><ShoppingBag size={28} />{cartTotalItems > 0 && <span className="absolute -top-1 -right-1 w-6 h-6 bg-red-500 rounded-full text-white text-xs font-bold flex items-center justify-center border-2 border-slate-950">{cartTotalItems}</span>}</button></div>}
       </div>
-
-      {/* Right Section: Sidebar */}
-      {/* Desktop: Always visible, Mobile: Slide-over */}
-      <div 
-        className={`
-          fixed inset-0 z-50 lg:static lg:z-auto lg:h-screen lg:flex lg:flex-col
-          transition-transform duration-300 ease-in-out
-          ${isMobile 
-             ? (isMobileCartOpen ? 'translate-x-0' : 'translate-x-full') 
-             : 'translate-x-0'
-          }
-        `}
-      >
-          {/* Mobile Overlay Background */}
-          {isMobile && isMobileCartOpen && (
-            <div 
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm lg:hidden"
-              onClick={() => setIsMobileCartOpen(false)}
-            ></div>
-          )}
-
-          <div className="relative h-full flex flex-col w-full lg:w-auto">
-             <CartSidebar 
+      
+      <div className={`fixed inset-0 z-50 lg:static lg:z-auto lg:h-screen lg:flex lg:flex-col transition-transform duration-300 ${isMobile ? (isMobileCartOpen ? 'translate-x-0' : 'translate-x-full') : 'translate-x-0'}`}>
+        {isMobile && isMobileCartOpen && <div className="absolute inset-0 bg-black/60 backdrop-blur-sm lg:hidden" onClick={() => setIsMobileCartOpen(false)}></div>}
+        <div className="relative h-full flex flex-col w-full">
+            <CartSidebar 
                 cartItems={cartItems} 
-                onUpdateQuantity={updateQuantity}
-                onRemove={removeFromCart}
-                onUpdateItem={updateCartItem}
-                onClear={clearCart}
-                orderType={orderType}
-                setOrderType={setOrderType}
-                selectedTable={selectedTable}
-                onReselectTable={handleReselectTable}
-                businessType={businessType}
-                isMobile={isMobile}
-                onClose={() => setIsMobileCartOpen(false)}
-                globalDiscount={globalDiscount}
-                setGlobalDiscount={setGlobalDiscount}
-                onCheckout={handleCheckout}
-                discounts={discounts}
-             />
-             
-             {/* Sidebar Overlay when shift closed (Desktop) */}
-             {!isMobile && !shiftData.isOpen && (
-                <div className="absolute inset-0 z-50 bg-slate-950/50 backdrop-blur-[2px] cursor-not-allowed"></div>
-             )}
-          </div>
+                onUpdateQuantity={updateQuantity} 
+                onRemove={removeFromCart} 
+                onUpdateItem={updateCartItem} 
+                onClear={clearCart} 
+                orderType={orderType} 
+                setOrderType={setOrderType} 
+                selectedTable={selectedTable} 
+                onReselectTable={handleReselectTable} 
+                businessType={businessType} 
+                isMobile={isMobile} 
+                onClose={() => setIsMobileCartOpen(false)} 
+                globalDiscount={globalDiscount} 
+                setGlobalDiscount={setGlobalDiscount} 
+                onCheckout={() => setIsCheckoutOpen(true)} 
+                onSendToKitchen={handleSendToKitchen} 
+                discounts={discounts} 
+            />
+        </div>
       </div>
 
-      {/* Global Modals */}
-      <ShiftModal 
-        isOpen={isShiftModalOpen}
-        onClose={() => setIsShiftModalOpen(false)}
-        shiftData={shiftData}
-        onConfirmShift={handleShiftUpdate}
-      />
+      <ControlCenter isOpen={isSideMenuOpen} onClose={() => setIsSideMenuOpen(false)} shiftData={shiftData} onOpenShiftModal={() => { setIsSideMenuOpen(false); setIsShiftModalOpen(true); }} onOpenSettings={() => { setIsSideMenuOpen(false); setIsSettingsOpen(true); }} />
+      <ShiftModal isOpen={isShiftModalOpen} onClose={() => setIsShiftModalOpen(false)} shiftData={shiftData} onConfirmShift={handleShiftUpdate} />
+      <VariantModal isOpen={isVariantModalOpen} onClose={() => setIsVariantModalOpen(false)} product={selectedProductForVariant} onAddToCart={addToCart} />
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} businessType={businessType} onChangeBusinessType={handleChangeBusinessType} categoryGroups={categoryGroups} onUpdateCategoryGroups={setCategoryGroups} discounts={discounts} onUpdateDiscounts={setDiscounts} printers={printers} onUpdatePrinters={setPrinters} />
+      <CheckoutModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} total={finalTotal} subtotal={subtotal} tax={tax} discount={totalDiscount} cartItems={cartItems} onComplete={handleTransactionComplete} globalDiscountName={globalDiscount.name} globalDiscountAmount={globalDiscountAmount} />
       
-      <VariantModal 
-         isOpen={isVariantModalOpen}
-         onClose={() => setIsVariantModalOpen(false)}
-         product={selectedProductForVariant}
-         onAddToCart={addToCart}
-      />
-
-      <SettingsModal 
-         isOpen={isSettingsOpen}
-         onClose={() => setIsSettingsOpen(false)}
-         businessType={businessType}
-         onChangeBusinessType={handleChangeBusinessType}
-         categoryGroups={categoryGroups}
-         onUpdateCategoryGroups={handleUpdateCategoryGroups}
-         discounts={discounts}
-         onUpdateDiscounts={setDiscounts}
-      />
-      
-      <CheckoutModal
-         isOpen={isCheckoutOpen}
-         onClose={() => setIsCheckoutOpen(false)}
-         total={finalTotal}
-         subtotal={subtotal}
-         tax={tax}
-         discount={totalDiscount}
-         cartItems={cartItems}
-         onComplete={handleTransactionComplete}
-         globalDiscountName={globalDiscount.name}
-         globalDiscountAmount={globalDiscountAmount}
+      <KitchenPreviewModal 
+        isOpen={isKitchenPreviewOpen} 
+        onClose={() => setIsKitchenPreviewOpen(false)} 
+        items={kitchenOrderItems} 
+        table={selectedTable} 
+        orderId={lastKitchenOrderId} 
+        cashierName={shiftData.cashierName}
+        printers={activeKitchenPrinters}
       />
     </div>
   );
