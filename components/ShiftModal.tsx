@@ -249,9 +249,13 @@ const ShiftModal: React.FC<ShiftModalProps> = (props) => {
                     <span className="font-black text-2xl tracking-tighter">Rp</span>
                   </div>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
                     value={startCash}
-                    onChange={(e) => setStartCash(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      setStartCash(val ? val.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : '');
+                    }}
                     className="w-full bg-slate-950 border-2 border-slate-800 rounded-3xl h-24 pl-16 pr-8 text-4xl font-black text-white focus:outline-none focus:border-emerald-500 focus:ring-8 focus:ring-emerald-500/5 transition-all tabular-nums placeholder:text-slate-900"
                     placeholder="0"
                     autoFocus
@@ -274,13 +278,13 @@ const ShiftModal: React.FC<ShiftModalProps> = (props) => {
                   isOpen: true,
                   cashierName: selectedCashier.name,
                   cashierId: selectedCashier.id,
-                  startCash: parseInt(startCash) || 0,
+                  startCash: parseInt(startCash.replace(/\./g, '')) || 0,
                   startTime: new Date()
                 })}
                 disabled={!startCash}
                 className="w-full h-20 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-lg rounded-3xl shadow-2xl shadow-emerald-500/20 active:scale-[0.98] transition-all disabled:opacity-50 uppercase tracking-[0.2em] flex items-center justify-center gap-3"
               >
-                <span>Activate Terminal</span>
+                <span>Open Shift</span>
                 <CheckCircle2 size={24} />
               </button>
             </div>
@@ -305,7 +309,7 @@ const ShiftModal: React.FC<ShiftModalProps> = (props) => {
                 onClick={() => onConfirmShift({ isOpen: false })}
                 className="w-full h-20 bg-red-500 hover:bg-red-400 text-white font-black text-lg rounded-3xl shadow-2xl shadow-red-500/20 active:scale-[0.98] transition-all uppercase tracking-[0.2em] flex items-center justify-center gap-3"
               >
-                <span>Finalize Session</span>
+                <span>Close Shift</span>
                 <Receipt size={24} />
               </button>
             </div>

@@ -18,6 +18,13 @@ import { Search, ScanLine, ArrowLeft, ShoppingBag, LayoutGrid, List } from 'luci
 import { supaDataService } from './services/supaDataService';
 
 function App() {
+  // Storage Keys
+  const STORAGE_KEYS = {
+    SESSION: 'pos_session',
+    HARDWARE: 'pos_hardware',
+    USER: 'pos_user'
+  };
+
   // Auth State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [selectedOutlet, setSelectedOutlet] = useState<any>(null);
@@ -33,8 +40,64 @@ function App() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
+  // Session restore flag to prevent double-loading
+  const [isSessionRestored, setIsSessionRestored] = useState(false);
+
   // Multi-outlet Mock Data - Removed usage but keeping variable if needed for ref
   const mockOutlets = [];
+
+  // Restore session from localStorage on mount
+  useEffect(() => {
+    const savedUser = localStorage.getItem(STORAGE_KEYS.USER);
+    const savedSession = localStorage.getItem(STORAGE_KEYS.SESSION);
+    const savedHardware = localStorage.getItem(STORAGE_KEYS.HARDWARE);
+
+    if (savedUser) {
+      try {
+        const user = JSON.parse(savedUser);
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+      } catch (e) {
+        console.error('Failed to restore user session', e);
+      }
+    }
+
+    if (savedSession) {
+      try {
+        const session = JSON.parse(savedSession);
+        if (session.outletId) {
+          setSelectedOutlet({ id: session.outletId, name: session.outletName });
+          setRegisterId(session.registerId);
+          if (session.businessType) {
+            setBusinessType(session.businessType);
+          }
+          // Restore shift if it was open
+          if (session.shiftId) {
+            setShiftData(prev => ({
+              ...prev,
+              isOpen: true,
+              shiftId: session.shiftId,
+              cashierId: session.cashierId,
+              cashierName: session.cashierName || prev.cashierName
+            }));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to restore session', e);
+      }
+    }
+
+    if (savedHardware) {
+      try {
+        const hw = JSON.parse(savedHardware);
+        setPrinters(hw);
+      } catch (e) {
+        console.error('Failed to restore hardware', e);
+      }
+    }
+
+    setIsSessionRestored(true);
+  }, []);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 1024);
@@ -75,10 +138,14 @@ function App() {
     }
   }, [isAuthenticated]);
 
-  const [printers, setPrinters] = useState<PrinterDevice[]>([
-    { id: 'net-002', name: 'Kitchen-Printer', ip: '192.168.1.200', status: 'online', type: 'network', copies: 1, printTypes: ['kitchen'], isActive: true, paperWidth: '80mm' },
-    { id: 'esp-001', name: 'Front-POS', ip: '192.168.1.105', status: 'online', type: 'esp32', copies: 1, printTypes: ['receipt'], isActive: true, paperWidth: '80mm' },
-  ]);
+  const [printers, setPrinters] = useState<PrinterDevice[]>([]);
+
+  // Save printers to localStorage when they change
+  useEffect(() => {
+    if (isSessionRestored) {
+      localStorage.setItem(STORAGE_KEYS.HARDWARE, JSON.stringify(printers));
+    }
+  }, [printers, isSessionRestored]);
 
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [globalDiscount, setGlobalDiscount] = useState<DiscountState>({ type: 'nominal', value: 0 });
@@ -106,20 +173,28 @@ function App() {
   const [activeKitchenPrinters, setActiveKitchenPrinters] = useState<{ name: string, width?: '58mm' | '80mm' }[]>([]);
 
   const handleLogin = (email: string, storeName: string, storeId?: string) => {
-    setCurrentUser({ email, storeName, storeId });
+    const user = { email, storeName, storeId };
+    setCurrentUser(user);
     setIsAuthenticated(true);
+    // Save to localStorage
+    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
     // Initial cashier name set but shift still closed
     setShiftData(prev => ({ ...prev, cashierName: email.split('@')[0].toUpperCase() }));
   };
 
   const handleLogout = () => {
+    // Clear localStorage
+    localStorage.removeItem(STORAGE_KEYS.USER);
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
+    // Keep hardware settings even after logout
+
     setIsAuthenticated(false);
     setSelectedOutlet(null);
     setCurrentUser(null);
     setCartItems([]);
     setSelectedTable(null);
     setIsSideMenuOpen(false);
-    setShiftData(prev => ({ ...prev, isOpen: false }));
+    setShiftData(prev => ({ ...prev, isOpen: false, shiftId: undefined }));
   };
 
   const handleSelectOutlet = async (outlet: any) => {
@@ -131,8 +206,9 @@ function App() {
         setShiftData(prev => ({ ...prev, registerName: register.name }));
 
         // Apply persisted business type
+        let savedType: BusinessType = 'fnb';
         if (register.business_type) {
-          const savedType = register.business_type as BusinessType;
+          savedType = register.business_type as BusinessType;
           setBusinessType(savedType);
 
           if (savedType === 'retail') {
@@ -142,6 +218,15 @@ function App() {
             setOrderType('dine-in');
           }
         }
+
+        // Save session to localStorage
+        const session = {
+          outletId: outlet.id,
+          outletName: outlet.name,
+          registerId: register.id,
+          businessType: savedType
+        };
+        localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
       }
     }
   };
@@ -246,6 +331,16 @@ function App() {
             }));
             setIsShiftModalOpen(false);
             setIsSideMenuOpen(false);
+
+            // Update session in localStorage with shift info
+            const savedSession = localStorage.getItem(STORAGE_KEYS.SESSION);
+            if (savedSession) {
+              const session = JSON.parse(savedSession);
+              session.shiftId = newShift.id;
+              session.cashierId = updatedData.cashierId;
+              session.cashierName = updatedData.cashierName;
+              localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
+            }
           } else {
             alert("Failed to start shift. Please try again.");
           }
@@ -267,6 +362,16 @@ function App() {
         setShiftData(prev => ({ ...prev, isOpen: false, shiftId: undefined }));
         setIsShiftModalOpen(false);
         setIsSideMenuOpen(false);
+
+        // Clear shift info from localStorage session
+        const savedSession = localStorage.getItem(STORAGE_KEYS.SESSION);
+        if (savedSession) {
+          const session = JSON.parse(savedSession);
+          delete session.shiftId;
+          delete session.cashierId;
+          delete session.cashierName;
+          localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(session));
+        }
       } catch (e) {
         console.error("Error closing shift", e);
       }

@@ -61,8 +61,7 @@ export const supaDataService = {
     async getCategories(): Promise<CategoryGroup[]> {
         const { data: categoriesData, error } = await supabase
             .from('categories')
-            .select('*')
-            .order('sort_order', { ascending: true });
+            .select('*');
 
         if (error) {
             console.error('Error fetching categories:', error);
@@ -147,7 +146,7 @@ export const supaDataService = {
                 name: p.name,
                 sku: p.sku || '',
                 price: Number(p.price),
-                image: p.image_url || 'https://via.placeholder.com/150', // Fallback image
+                image: p.image_url || '', // No fallback - keep empty for lightweight UI
                 category: p.category?.id || 'uncategorized', // Use category ID to match
                 stock: p.stock_quantity || 0,
                 optionGroups: optionGroups.length > 0 ? optionGroups : undefined,
@@ -171,7 +170,7 @@ export const supaDataService = {
             .from('registers')
             .select('*')
             .eq('device_id', deviceId)
-            .single();
+            .maybeSingle();
 
         if (existingRegister) {
             // Backfill number if missing (for registers created before this update)
@@ -353,7 +352,8 @@ export const supaDataService = {
             product_name: item.name,
             quantity: item.quantity,
             price: item.price,
-            total: item.price * item.quantity,
+            discount: item.discount || 0,
+            total: (item.price * item.quantity) - ((item.discount || 0) * item.quantity),
             options: item.selectedOptions // JSONB
         }));
 
