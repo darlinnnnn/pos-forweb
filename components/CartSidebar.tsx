@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { CartItem, Table, Customer, BusinessType, DiscountState, DiscountRule } from '../types';
 import { User, ChevronDown, Trash2, Edit3, Plus, Minus, ArrowRight, Percent, Trash, ShoppingBag, MapPin, UtensilsCrossed, Bike, Package, ArrowLeftFromLine, ArrowRightFromLine, Tag, UserPlus, X, Check, Mail, Phone, MessageSquare, ArrowLeft, DollarSign, Calculator, AlertCircle, ChefHat } from 'lucide-react';
 
@@ -22,16 +22,19 @@ interface CartSidebarProps {
     discounts: DiscountRule[];
 }
 
-const CartItemRow: React.FC<{
+interface CartItemRowProps {
     item: CartItem;
     onUpdateQuantity: (id: string, delta: number) => void;
     onRemove: (id: string) => void;
     onEdit: (item: CartItem) => void;
     formatCurrency: (amount: number) => string;
-}> = ({ item, onUpdateQuantity, onRemove, onEdit, formatCurrency }) => {
+}
+
+const CartItemRow = memo<CartItemRowProps>(({ item, onUpdateQuantity, onRemove, onEdit, formatCurrency }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [offsetX, setOffsetX] = useState(0);
     const touchStartX = useRef<number | null>(null);
+    const isSwipingRef = useRef(false);
 
     const unitPrice = item.price;
     const unitDiscount = item.discount || 0;
@@ -39,55 +42,101 @@ const CartItemRow: React.FC<{
     const discountTotal = unitDiscount * item.quantity;
     const finalTotal = originalTotal - discountTotal;
 
-    const handleTouchStart = (e: React.TouchEvent) => {
+    const handleTouchStart = useCallback((e: React.TouchEvent) => {
         touchStartX.current = e.touches[0].clientX;
-    };
+        isSwipingRef.current = false;
+    }, []);
 
-    const handleTouchMove = (e: React.TouchEvent) => {
+    const handleTouchMove = useCallback((e: React.TouchEvent) => {
         if (touchStartX.current === null) return;
         const currentX = e.touches[0].clientX;
         const diff = currentX - touchStartX.current;
-        if (!isOpen) {
-            if (diff < 0) setOffsetX(Math.max(diff, -100));
-        } else {
-            setOffsetX(Math.min(diff - 80, 0));
-        }
-    };
 
-    const handleTouchEnd = () => {
-        if (!isOpen) {
-            if (offsetX < -50) {
-                setIsOpen(true);
-                setOffsetX(-80);
-            } else {
-                setOffsetX(0);
-            }
-        } else {
-            if (offsetX > -60) {
-                setIsOpen(false);
-                setOffsetX(0);
-            } else {
-                setOffsetX(-80);
-            }
+        // Mark as swiping if moved more than 10px horizontally
+        if (Math.abs(diff) > 10) {
+            isSwipingRef.current = true;
         }
+
+        setIsOpen(prevIsOpen => {
+            if (!prevIsOpen) {
+                if (diff < 0) setOffsetX(Math.max(diff, -100));
+            } else {
+                setOffsetX(Math.min(diff - 80, 0));
+            }
+            return prevIsOpen;
+        });
+    }, []);
+
+    const handleTouchEnd = useCallback(() => {
+        setIsOpen(prevIsOpen => {
+            if (!prevIsOpen) {
+                if (offsetX < -50) {
+                    setOffsetX(-80);
+                    return true;
+                } else {
+                    setOffsetX(0);
+                    return false;
+                }
+            } else {
+                if (offsetX > -60) {
+                    setOffsetX(0);
+                    return false;
+                } else {
+                    setOffsetX(-80);
+                    return true;
+                }
+            }
+        });
         touchStartX.current = null;
-    };
+    }, [offsetX]);
+
+    const handleRemove = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        onRemove(item.cartId);
+    }, [item.cartId, onRemove]);
+
+    const handleDecrement = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        onUpdateQuantity(item.cartId, -1);
+    }, [item.cartId, onUpdateQuantity]);
+
+    const handleIncrement = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        onUpdateQuantity(item.cartId, 1);
+    }, [item.cartId, onUpdateQuantity]);
+
+    const handleEdit = useCallback(() => {
+        onEdit(item);
+    }, [item, onEdit]);
+
+    const handleRowClick = useCallback(() => {
+        if (isOpen) {
+            setIsOpen(false);
+            setOffsetX(0);
+        } else {
+            onEdit(item);
+        }
+    }, [isOpen, item, onEdit]);
 
     return (
-        <div className="relative overflow-hidden mb-1.5 group/item">
+        <div className="relative overflow-hidden mb-1.5 group/item" style={{ contain: 'layout style paint' }}>
             <div className="absolute inset-y-0 right-0 w-[80px] bg-red-500/10 flex items-center justify-center z-0">
-                <button onClick={(e) => { e.stopPropagation(); onRemove(item.cartId); }} className="w-full h-full flex flex-col items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition-colors">
+                <button onClick={handleRemove} className="w-full h-full flex flex-col items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition-colors">
                     <Trash2 size={24} />
                     <span className="text-[10px] font-black uppercase mt-1">Delete</span>
                 </button>
             </div>
             <div
-                className="relative bg-white dark:bg-slate-900 transition-all duration-300 ease-out border-b border-slate-100 dark:border-slate-800/50 -mx-4 md:-mx-5 z-10 hover:bg-slate-50 dark:hover:bg-slate-850 shadow-sm dark:shadow-none"
-                style={{ transform: `translateX(${offsetX}px)` }}
+                className="relative bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800/50 -mx-4 md:-mx-5 z-10 hover:bg-slate-50 dark:hover:bg-slate-850 shadow-sm dark:shadow-none"
+                style={{
+                    transform: `translate3d(${offsetX}px, 0, 0)`,
+                    willChange: 'transform',
+                    backfaceVisibility: 'hidden'
+                }}
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
-                onClick={() => { if (isOpen) { setIsOpen(false); setOffsetX(0); } else { onEdit(item); } }}
+                onClick={handleRowClick}
             >
                 <div className="py-4 px-4 md:px-5 flex gap-3">
                     {item.isUnsent && (
@@ -114,13 +163,13 @@ const CartItemRow: React.FC<{
                         {/* INCREASED TAP TARGETS FOR BUTTONS */}
                         <div className="flex justify-between items-center" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 h-11 shadow-inner">
-                                <button onClick={(e) => { e.stopPropagation(); onUpdateQuantity(item.cartId, -1); }} className="size-11 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-l-2xl transition-all active:scale-90"><Minus size={18} strokeWidth={3} /></button>
+                                <button onClick={handleDecrement} className="size-11 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-l-2xl transition-all active:scale-90"><Minus size={18} strokeWidth={3} /></button>
                                 <span className="w-10 text-center text-sm font-black text-slate-900 dark:text-white tabular-nums">{item.quantity}</span>
-                                <button onClick={(e) => { e.stopPropagation(); onUpdateQuantity(item.cartId, 1); }} className="size-11 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-r-2xl transition-all active:scale-90"><Plus size={18} strokeWidth={3} /></button>
+                                <button onClick={handleIncrement} className="size-11 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-r-2xl transition-all active:scale-90"><Plus size={18} strokeWidth={3} /></button>
                             </div>
                             <div className="flex items-center gap-3">
                                 {item.isUnsent && <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-500 bg-emerald-100 dark:bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-200 dark:border-none shadow-sm dark:shadow-none">New Order</span>}
-                                <button onClick={() => onEdit(item)} className="size-11 flex items-center justify-center bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-500 dark:text-slate-400 hover:text-primary-500 dark:hover:text-primary-400 transition-all active:scale-90 shadow-sm dark:shadow-none"><Edit3 size={20} /></button>
+                                <button onClick={handleEdit} className="size-11 flex items-center justify-center bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-500 dark:text-slate-400 hover:text-primary-500 dark:hover:text-primary-400 transition-all active:scale-90 shadow-sm dark:shadow-none"><Edit3 size={20} /></button>
                             </div>
                         </div>
                     </div>
@@ -128,7 +177,7 @@ const CartItemRow: React.FC<{
             </div>
         </div>
     );
-};
+});
 
 const EditItemModal: React.FC<{
     item: CartItem | null;
@@ -343,9 +392,9 @@ const CartSidebar: React.FC<CartSidebarProps> = ({
     const total = taxableAmount + tax;
     const totalItems = cartItems.reduce((acc, item) => acc + item.quantity, 0);
 
-    const formatCurrency = (amount: number) => {
+    const formatCurrency = useCallback((amount: number) => {
         return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
-    };
+    }, []);
 
     const isDineIn = businessType === 'fnb' && orderType === 'dine-in';
     const hasUnsentItems = cartItems.some(item => item.isUnsent);
@@ -394,8 +443,15 @@ const CartSidebar: React.FC<CartSidebarProps> = ({
                 )}
             </div>
 
-            {/* Cart Items */}
-            <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-1 no-scrollbar transition-colors">
+            {/* Cart Items - Optimized for smooth scrolling */}
+            <div
+                className="flex-1 overflow-y-auto px-4 sm:px-5 py-4 space-y-1 no-scrollbar transition-colors"
+                style={{
+                    WebkitOverflowScrolling: 'touch',
+                    overscrollBehavior: 'contain',
+                    contain: 'strict'
+                }}
+            >
                 {cartItems.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center opacity-20 select-none text-slate-400 dark:text-slate-600"><ShoppingBag size={80} strokeWidth={1} className="mb-4" /><p className="font-black uppercase tracking-[0.3em] text-sm">Basket is Empty</p></div>
                 ) : (

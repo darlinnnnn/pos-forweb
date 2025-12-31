@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
+    "@types/react-window": "^1.8.8",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "react-window": "^2.2.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
