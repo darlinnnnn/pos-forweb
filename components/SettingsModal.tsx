@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { X, Utensils, ShoppingBag, Check, Printer, Wifi, RefreshCw, Smartphone, Laptop, Menu, Edit2, Save, Tag, Trash2, Plus, ChevronRight, Cpu, Radio, Activity, Copy, Sliders, ChevronLeft, Power, Ruler } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Utensils, ShoppingBag, Check, Printer, Wifi, WifiOff, RefreshCw, Smartphone, Laptop, Menu, Edit2, Save, Tag, Trash2, Plus, ChevronRight, Cpu, Radio, Activity, Copy, Sliders, ChevronLeft, Power, Ruler, FileText, CheckCircle, XCircle } from 'lucide-react';
 import { BusinessType, PrinterDevice, CategoryGroup, DiscountRule } from '../types';
+import { printerService, PrinterStatus } from '../services/printerService';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -31,6 +32,72 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     const [isScanning, setIsScanning] = useState(false);
     const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(printers.find(p => p.isActive)?.id || null);
     const [editingPrinter, setEditingPrinter] = useState<PrinterDevice | null>(null);
+
+    // ESP32 Printer State
+    const [espIp, setEspIp] = useState('');
+    const [espPort, setEspPort] = useState(81);
+    const [espStatus, setEspStatus] = useState<PrinterStatus>({ appConnected: false, printerConnected: false, lastUpdate: 0 });
+    const [isConnecting, setIsConnecting] = useState(false);
+    const [isPrinting, setIsPrinting] = useState(false);
+    const [espMessage, setEspMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+    // Subscribe to ESP32 printer status
+    useEffect(() => {
+        const config = printerService.loadConfig();
+        setEspIp(config.espIp);
+        setEspPort(config.espPort);
+
+        const unsubscribe = printerService.onStatusChange((status) => {
+            setEspStatus(status);
+        });
+
+        // Auto-connect if previously configured
+        if (config.espIp && config.autoReconnect) {
+            printerService.connect();
+        }
+
+        return () => unsubscribe();
+    }, []);
+
+    // ESP32 Connect/Disconnect handler
+    const handleEspConnect = async () => {
+        if (espStatus.appConnected) {
+            printerService.disconnect();
+            printerService.saveConfig({ autoReconnect: false });
+        } else {
+            if (!espIp) {
+                setEspMessage({ type: 'error', text: 'Masukkan IP Address ESP32' });
+                return;
+            }
+            setIsConnecting(true);
+            setEspMessage(null);
+
+            const success = await printerService.connect(espIp, espPort);
+            setIsConnecting(false);
+
+            if (success) {
+                setEspMessage({ type: 'success', text: 'Terhubung ke ESP32!' });
+                printerService.saveConfig({ espIp, espPort, autoReconnect: true });
+            } else {
+                setEspMessage({ type: 'error', text: 'Gagal terhubung. Periksa IP dan pastikan ESP32 menyala.' });
+            }
+        }
+    };
+
+    // ESP32 Test Print handler
+    const handleEspTestPrint = async () => {
+        setIsPrinting(true);
+        setEspMessage(null);
+
+        const result = await printerService.printTest();
+        setIsPrinting(false);
+
+        if (result.success) {
+            setEspMessage({ type: 'success', text: 'Test print berhasil!' });
+        } else {
+            setEspMessage({ type: 'error', text: result.error || 'Gagal print' });
+        }
+    };
 
     if (!isOpen) return null;
 
@@ -133,6 +200,93 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
                     {activeTab === 'hardware' && (
                         <div className="animate-in slide-in-from-right-4 duration-300 space-y-6">
+                            {/* ESP32 Printer Bridge Section */}
+                            <div className="bg-gradient-to-br from-primary-500/10 to-slate-800/30 border border-primary-500/30 rounded-2xl p-6 space-y-5">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-primary-500/20 rounded-xl flex items-center justify-center">
+                                        <Cpu size={20} className="text-primary-400" />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-lg font-bold text-white">ESP32 Printer Bridge</h4>
+                                        <p className="text-xs text-slate-500">WebSocket connection ke thermal printer</p>
+                                    </div>
+                                </div>
+
+                                {/* Connection Status */}
+                                <div className="bg-slate-900/50 rounded-xl p-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            {espStatus.appConnected ? <Wifi size={18} className="text-emerald-500" /> : <WifiOff size={18} className="text-slate-500" />}
+                                            <span className="text-sm font-bold text-slate-400">App ↔ ESP32</span>
+                                        </div>
+                                        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${espStatus.appConnected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                                            {espStatus.appConnected ? <><CheckCircle size={12} /> Connected</> : <><XCircle size={12} /> Offline</>}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <Printer size={18} className={espStatus.printerConnected ? 'text-emerald-500' : 'text-slate-500'} />
+                                            <span className="text-sm font-bold text-slate-400">ESP32 ↔ Printer</span>
+                                        </div>
+                                        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${espStatus.printerConnected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                                            {espStatus.printerConnected ? <><CheckCircle size={12} /> Ready</> : <><XCircle size={12} /> Not Ready</>}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* IP Configuration */}
+                                <div className="grid grid-cols-4 gap-3">
+                                    <div className="col-span-3">
+                                        <input
+                                            type="text"
+                                            value={espIp}
+                                            onChange={(e) => setEspIp(e.target.value)}
+                                            placeholder="192.168.1.100"
+                                            disabled={espStatus.appConnected}
+                                            className="w-full h-12 bg-slate-950 border border-slate-700 rounded-xl px-4 text-white font-mono text-sm focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 placeholder:text-slate-700 disabled:opacity-50"
+                                        />
+                                        <span className="text-[10px] text-slate-500 ml-2">IP Address</span>
+                                    </div>
+                                    <div>
+                                        <input
+                                            type="number"
+                                            value={espPort}
+                                            onChange={(e) => setEspPort(parseInt(e.target.value) || 81)}
+                                            disabled={espStatus.appConnected}
+                                            className="w-full h-12 bg-slate-950 border border-slate-700 rounded-xl px-3 text-white font-mono text-sm text-center focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 disabled:opacity-50"
+                                        />
+                                        <span className="text-[10px] text-slate-500 ml-2">Port</span>
+                                    </div>
+                                </div>
+
+                                {/* Message */}
+                                {espMessage && (
+                                    <div className={`p-3 rounded-xl text-sm font-bold flex items-center gap-2 ${espMessage.type === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                                        {espMessage.type === 'success' ? <CheckCircle size={16} /> : <XCircle size={16} />}
+                                        {espMessage.text}
+                                    </div>
+                                )}
+
+                                {/* Actions */}
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={handleEspConnect}
+                                        disabled={isConnecting}
+                                        className={`h-12 font-bold rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 ${espStatus.appConnected ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-primary-500 text-slate-950'}`}
+                                    >
+                                        {isConnecting ? <><RefreshCw size={18} className="animate-spin" /> Connecting...</> : espStatus.appConnected ? <><WifiOff size={18} /> Disconnect</> : <><Wifi size={18} /> Connect</>}
+                                    </button>
+                                    <button
+                                        onClick={handleEspTestPrint}
+                                        disabled={!espStatus.appConnected || !espStatus.printerConnected || isPrinting}
+                                        className="h-12 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-40"
+                                    >
+                                        {isPrinting ? <><RefreshCw size={18} className="animate-spin" /> Printing...</> : <><FileText size={18} /> Test Print</>}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Printer Network Section (Original) */}
                             <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-6">
                                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-center sm:text-left">
                                     <div>
