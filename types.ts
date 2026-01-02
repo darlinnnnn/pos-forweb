@@ -122,6 +122,7 @@ export interface PrinterDevice {
   id: string;
   name: string;
   ip: string;
+  port?: number; // WebSocket port (default: 81)
   status: 'online' | 'offline';
   type: 'esp32' | 'network';
   copies?: number;

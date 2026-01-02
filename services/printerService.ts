@@ -1,4 +1,6 @@
-// Printer Service - WebSocket communication with ESP32 printer bridge
+// Printer Service - Multi-printer WebSocket communication with ESP32 bridges
+
+import { PrinterDevice } from '../types';
 
 export interface PrinterStatus {
     appConnected: boolean;      // Web app connected to ESP32
@@ -20,239 +22,250 @@ export interface PrintJob {
     openDrawer?: boolean;
 }
 
-export interface PrinterConfig {
-    espIp: string;
-    espPort: number;
-    autoReconnect: boolean;
-    reconnectInterval: number;
-}
-
-type StatusCallback = (status: PrinterStatus) => void;
+type StatusCallback = (printerId: string, status: PrinterStatus) => void;
 type PrintResultCallback = (success: boolean, error?: string) => void;
 
-class PrinterService {
-    private ws: WebSocket | null = null;
-    private config: PrinterConfig = {
-        espIp: '',
-        espPort: 81,
-        autoReconnect: true,
-        reconnectInterval: 5000
+interface PrinterConnection {
+    ws: WebSocket | null;
+    status: PrinterStatus;
+    reconnectTimer: ReturnType<typeof setTimeout> | null;
+    statusPollTimer: ReturnType<typeof setInterval> | null;
+    printResultCallback: PrintResultCallback | null;
+    config: {
+        ip: string;
+        port: number;
+        autoReconnect: boolean;
     };
-    private status: PrinterStatus = {
-        appConnected: false,
-        printerConnected: false,
-        lastUpdate: 0
-    };
+}
+
+class MultiPrinterService {
+    private connections: Map<string, PrinterConnection> = new Map();
     private statusListeners: Set<StatusCallback> = new Set();
-    private printResultCallback: PrintResultCallback | null = null;
-    private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    private statusPollTimer: ReturnType<typeof setInterval> | null = null;
+    private reconnectInterval = 5000;
 
-    // Get current config
-    getConfig(): PrinterConfig {
-        return { ...this.config };
-    }
-
-    // Get current status
-    getStatus(): PrinterStatus {
-        return { ...this.status };
-    }
-
-    // Load config from localStorage
-    loadConfig(): PrinterConfig {
-        try {
-            const saved = localStorage.getItem('printer_config');
-            if (saved) {
-                this.config = { ...this.config, ...JSON.parse(saved) };
-            }
-        } catch (e) {
-            console.error('Failed to load printer config:', e);
-        }
-        return this.config;
-    }
-
-    // Save config to localStorage
-    saveConfig(config: Partial<PrinterConfig>): void {
-        this.config = { ...this.config, ...config };
-        localStorage.setItem('printer_config', JSON.stringify(this.config));
-    }
-
-    // Subscribe to status changes
+    // Subscribe to status changes for all printers
     onStatusChange(callback: StatusCallback): () => void {
         this.statusListeners.add(callback);
-        // Immediately call with current status
-        callback(this.status);
-        // Return unsubscribe function
+        // Immediately call with current status for all connected printers
+        this.connections.forEach((conn, printerId) => {
+            callback(printerId, conn.status);
+        });
         return () => this.statusListeners.delete(callback);
     }
 
     // Notify all status listeners
-    private notifyStatusChange(): void {
-        this.statusListeners.forEach(cb => cb(this.status));
+    private notifyStatusChange(printerId: string, status: PrinterStatus): void {
+        this.statusListeners.forEach(cb => cb(printerId, status));
     }
 
-    // Update status
-    private updateStatus(updates: Partial<PrinterStatus>): void {
-        this.status = { ...this.status, ...updates, lastUpdate: Date.now() };
-        this.notifyStatusChange();
+    // Get status for a specific printer
+    getStatus(printerId: string): PrinterStatus {
+        const conn = this.connections.get(printerId);
+        return conn?.status || { appConnected: false, printerConnected: false, lastUpdate: 0 };
     }
 
-    // Connect to ESP32
-    connect(ip?: string, port?: number): Promise<boolean> {
+    // Get all printer statuses
+    getAllStatuses(): Map<string, PrinterStatus> {
+        const statuses = new Map<string, PrinterStatus>();
+        this.connections.forEach((conn, id) => {
+            statuses.set(id, conn.status);
+        });
+        return statuses;
+    }
+
+    // Connect to a printer
+    connect(printer: PrinterDevice): Promise<boolean> {
         return new Promise((resolve) => {
-            if (ip) this.config.espIp = ip;
-            if (port) this.config.espPort = port;
+            const printerId = printer.id;
+            const ip = printer.ip;
+            const port = printer.port || 81;
 
-            if (!this.config.espIp) {
-                console.error('ESP32 IP not configured');
+            if (!ip) {
+                console.error(`Printer ${printerId}: IP not configured`);
                 resolve(false);
                 return;
             }
 
-            // Close existing connection
-            this.closeConnection();
+            // Close existing connection if any
+            this.disconnect(printerId, false);
 
-            const wsUrl = `ws://${this.config.espIp}:${this.config.espPort}`;
-            console.log(`Connecting to ESP32 at ${wsUrl}...`);
+            const connection: PrinterConnection = {
+                ws: null,
+                status: { appConnected: false, printerConnected: false, lastUpdate: Date.now() },
+                reconnectTimer: null,
+                statusPollTimer: null,
+                printResultCallback: null,
+                config: { ip, port, autoReconnect: true }
+            };
+
+            this.connections.set(printerId, connection);
+
+            const wsUrl = `ws://${ip}:${port}`;
+            console.log(`Connecting to printer ${printerId} at ${wsUrl}...`);
 
             try {
-                this.ws = new WebSocket(wsUrl);
+                connection.ws = new WebSocket(wsUrl);
 
                 const connectionTimeout = setTimeout(() => {
-                    if (this.ws?.readyState !== WebSocket.OPEN) {
-                        console.error('Connection timeout');
-                        this.ws?.close();
-                        this.updateStatus({ appConnected: false });
+                    if (connection.ws?.readyState !== WebSocket.OPEN) {
+                        console.error(`Printer ${printerId}: Connection timeout`);
+                        connection.ws?.close();
+                        this.updateStatus(printerId, { appConnected: false });
                         resolve(false);
                     }
                 }, 5000);
 
-                this.ws.onopen = () => {
+                connection.ws.onopen = () => {
                     clearTimeout(connectionTimeout);
-                    console.log('Connected to ESP32');
-                    this.updateStatus({ appConnected: true });
-                    this.saveConfig({ espIp: this.config.espIp, espPort: this.config.espPort });
-
-                    // Request initial status
-                    this.requestStatus();
-
-                    // Start status polling
-                    this.startStatusPolling();
-
+                    console.log(`Printer ${printerId}: Connected`);
+                    this.updateStatus(printerId, { appConnected: true });
+                    this.requestStatus(printerId);
+                    this.startStatusPolling(printerId);
                     resolve(true);
                 };
 
-                this.ws.onmessage = (event) => {
-                    this.handleMessage(event.data);
+                connection.ws.onmessage = (event) => {
+                    this.handleMessage(printerId, event.data);
                 };
 
-                this.ws.onerror = (error) => {
-                    console.error('WebSocket error:', error);
+                connection.ws.onerror = (error) => {
+                    console.error(`Printer ${printerId}: WebSocket error`, error);
                 };
 
-                this.ws.onclose = () => {
-                    console.log('Disconnected from ESP32');
-                    this.updateStatus({ appConnected: false, printerConnected: false });
-                    this.stopStatusPolling();
+                connection.ws.onclose = () => {
+                    console.log(`Printer ${printerId}: Disconnected`);
+                    this.updateStatus(printerId, { appConnected: false, printerConnected: false });
+                    this.stopStatusPolling(printerId);
 
                     // Auto reconnect
-                    if (this.config.autoReconnect && this.config.espIp) {
-                        this.scheduleReconnect();
+                    const conn = this.connections.get(printerId);
+                    if (conn?.config.autoReconnect) {
+                        this.scheduleReconnect(printerId);
                     }
                 };
             } catch (error) {
-                console.error('Failed to create WebSocket:', error);
+                console.error(`Printer ${printerId}: Failed to create WebSocket`, error);
                 resolve(false);
             }
         });
     }
 
-    // Close WebSocket connection
-    private closeConnection(): void {
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
+    // Disconnect from a printer
+    disconnect(printerId: string, permanent = true): void {
+        const conn = this.connections.get(printerId);
+        if (!conn) return;
+
+        if (conn.reconnectTimer) {
+            clearTimeout(conn.reconnectTimer);
+            conn.reconnectTimer = null;
         }
-        this.stopStatusPolling();
-        if (this.ws) {
-            this.ws.onclose = null; // Prevent auto-reconnect
-            this.ws.close();
-            this.ws = null;
+
+        this.stopStatusPolling(printerId);
+
+        if (conn.ws) {
+            conn.ws.onclose = null; // Prevent auto-reconnect trigger
+            conn.ws.close();
+            conn.ws = null;
         }
+
+        if (permanent) {
+            conn.config.autoReconnect = false;
+        }
+
+        this.updateStatus(printerId, { appConnected: false, printerConnected: false });
     }
 
-    // Disconnect from ESP32
-    disconnect(): void {
-        this.config.autoReconnect = false;
-        this.closeConnection();
-        this.updateStatus({ appConnected: false, printerConnected: false });
+    // Update status for a printer
+    private updateStatus(printerId: string, updates: Partial<PrinterStatus>): void {
+        const conn = this.connections.get(printerId);
+        if (!conn) return;
+
+        conn.status = { ...conn.status, ...updates, lastUpdate: Date.now() };
+        this.notifyStatusChange(printerId, conn.status);
     }
 
     // Schedule reconnection attempt
-    private scheduleReconnect(): void {
-        if (this.reconnectTimer) return;
+    private scheduleReconnect(printerId: string): void {
+        const conn = this.connections.get(printerId);
+        if (!conn || conn.reconnectTimer) return;
 
-        console.log(`Reconnecting in ${this.config.reconnectInterval}ms...`);
-        this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
-            if (this.config.autoReconnect) {
-                this.connect();
+        console.log(`Printer ${printerId}: Reconnecting in ${this.reconnectInterval}ms...`);
+        conn.reconnectTimer = setTimeout(() => {
+            conn.reconnectTimer = null;
+            if (conn.config.autoReconnect) {
+                // Reconstruct minimal printer object for reconnect
+                this.connect({
+                    id: printerId,
+                    ip: conn.config.ip,
+                    port: conn.config.port,
+                    name: '',
+                    status: 'offline',
+                    type: 'esp32'
+                });
             }
-        }, this.config.reconnectInterval);
+        }, this.reconnectInterval);
     }
 
     // Start polling printer status
-    private startStatusPolling(): void {
-        this.stopStatusPolling();
-        this.statusPollTimer = setInterval(() => {
-            this.requestStatus();
+    private startStatusPolling(printerId: string): void {
+        this.stopStatusPolling(printerId);
+        const conn = this.connections.get(printerId);
+        if (!conn) return;
+
+        conn.statusPollTimer = setInterval(() => {
+            this.requestStatus(printerId);
         }, 3000);
     }
 
     // Stop polling
-    private stopStatusPolling(): void {
-        if (this.statusPollTimer) {
-            clearInterval(this.statusPollTimer);
-            this.statusPollTimer = null;
-        }
+    private stopStatusPolling(printerId: string): void {
+        const conn = this.connections.get(printerId);
+        if (!conn?.statusPollTimer) return;
+
+        clearInterval(conn.statusPollTimer);
+        conn.statusPollTimer = null;
     }
 
     // Request status from ESP32
-    requestStatus(): void {
-        this.send({ type: 'status' });
+    private requestStatus(printerId: string): void {
+        this.send(printerId, { type: 'status' });
     }
 
     // Send message to ESP32
-    private send(data: object): boolean {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            console.warn('WebSocket not connected');
+    private send(printerId: string, data: object): boolean {
+        const conn = this.connections.get(printerId);
+        if (!conn?.ws || conn.ws.readyState !== WebSocket.OPEN) {
+            console.warn(`Printer ${printerId}: WebSocket not connected`);
             return false;
         }
         try {
-            this.ws.send(JSON.stringify(data));
+            conn.ws.send(JSON.stringify(data));
             return true;
         } catch (error) {
-            console.error('Failed to send message:', error);
+            console.error(`Printer ${printerId}: Failed to send message`, error);
             return false;
         }
     }
 
     // Handle incoming message from ESP32
-    private handleMessage(data: string): void {
+    private handleMessage(printerId: string, data: string): void {
+        const conn = this.connections.get(printerId);
+        if (!conn) return;
+
         try {
             const msg = JSON.parse(data);
 
             switch (msg.type) {
                 case 'status':
-                    this.updateStatus({
+                    this.updateStatus(printerId, {
                         printerConnected: msg.printer === true
                     });
                     break;
 
                 case 'print_result':
-                    if (this.printResultCallback) {
-                        this.printResultCallback(msg.success === true, msg.error);
-                        this.printResultCallback = null;
+                    if (conn.printResultCallback) {
+                        conn.printResultCallback(msg.success === true, msg.error);
+                        conn.printResultCallback = null;
                     }
                     break;
 
@@ -261,33 +274,35 @@ class PrinterService {
                     break;
 
                 default:
-                    console.log('Unknown message type:', msg.type);
+                    console.log(`Printer ${printerId}: Unknown message type`, msg.type);
             }
         } catch (error) {
-            console.error('Failed to parse message:', error);
+            console.error(`Printer ${printerId}: Failed to parse message`, error);
         }
     }
 
-    // Print receipt/document
-    print(job: PrintJob): Promise<{ success: boolean; error?: string }> {
+    // Print to a specific printer
+    print(printerId: string, job: PrintJob): Promise<{ success: boolean; error?: string }> {
         return new Promise((resolve) => {
-            if (!this.status.appConnected) {
+            const conn = this.connections.get(printerId);
+
+            if (!conn?.status.appConnected) {
                 resolve({ success: false, error: 'Not connected to ESP32' });
                 return;
             }
 
-            if (!this.status.printerConnected) {
+            if (!conn.status.printerConnected) {
                 resolve({ success: false, error: 'Printer not connected' });
                 return;
             }
 
             // Set callback for print result
-            this.printResultCallback = (success, error) => {
+            conn.printResultCallback = (success, error) => {
                 resolve({ success, error });
             };
 
             // Send print job
-            const sent = this.send({
+            const sent = this.send(printerId, {
                 type: 'print',
                 lines: job.lines,
                 cut: job.cut !== false,
@@ -295,23 +310,57 @@ class PrinterService {
             });
 
             if (!sent) {
-                this.printResultCallback = null;
+                conn.printResultCallback = null;
                 resolve({ success: false, error: 'Failed to send print job' });
                 return;
             }
 
             // Timeout for print result
             setTimeout(() => {
-                if (this.printResultCallback) {
-                    this.printResultCallback = null;
+                if (conn.printResultCallback) {
+                    conn.printResultCallback = null;
                     resolve({ success: false, error: 'Print timeout' });
                 }
             }, 10000);
         });
     }
 
-    // Print a simple test page
-    printTest(): Promise<{ success: boolean; error?: string }> {
+    // Print to printers by job type (receipt, kitchen, order)
+    async printByType(
+        jobType: 'receipt' | 'kitchen' | 'order',
+        job: PrintJob,
+        availablePrinters: PrinterDevice[]
+    ): Promise<{ printerId: string; success: boolean; error?: string }[]> {
+        const results: { printerId: string; success: boolean; error?: string }[] = [];
+
+        // Find printers that handle this job type
+        const targetPrinters = availablePrinters.filter(p =>
+            p.isActive && p.printTypes?.includes(jobType)
+        );
+
+        for (const printer of targetPrinters) {
+            const status = this.getStatus(printer.id);
+            if (status.appConnected && status.printerConnected) {
+                // Print multiple copies if configured
+                const copies = printer.copies || 1;
+                for (let i = 0; i < copies; i++) {
+                    const result = await this.print(printer.id, job);
+                    results.push({ printerId: printer.id, ...result });
+                }
+            } else {
+                results.push({
+                    printerId: printer.id,
+                    success: false,
+                    error: 'Printer not connected'
+                });
+            }
+        }
+
+        return results;
+    }
+
+    // Print a test page to a specific printer
+    printTest(printerId: string): Promise<{ success: boolean; error?: string }> {
         const testJob: PrintJob = {
             lines: [
                 { text: '================================', type: 'separator' },
@@ -319,6 +368,7 @@ class PrinterService {
                 { text: '================================', type: 'separator' },
                 { text: '' },
                 { text: 'ESP32 Printer Bridge', align: 'center' },
+                { text: `Printer ID: ${printerId}`, align: 'center' },
                 { text: `Time: ${new Date().toLocaleString('id-ID')}`, align: 'center' },
                 { text: '' },
                 { text: 'Font Styles:', bold: true },
@@ -338,9 +388,50 @@ class PrinterService {
             ],
             cut: true
         };
-        return this.print(testJob);
+        return this.print(printerId, testJob);
+    }
+
+    // Connect to all active printers (for auto-connect on app load)
+    async connectAll(printers: PrinterDevice[]): Promise<void> {
+        const activePrinters = printers.filter(p => p.isActive && p.ip);
+        for (const printer of activePrinters) {
+            await this.connect(printer);
+        }
+    }
+
+    // Disconnect from all printers
+    disconnectAll(): void {
+        this.connections.forEach((_, printerId) => {
+            this.disconnect(printerId, true);
+        });
+    }
+
+    // Save printers config to localStorage
+    savePrintersConfig(printers: PrinterDevice[]): void {
+        localStorage.setItem('printers_config', JSON.stringify(printers));
+    }
+
+    // Load printers config from localStorage
+    loadPrintersConfig(): PrinterDevice[] {
+        try {
+            const saved = localStorage.getItem('printers_config');
+            if (saved) {
+                return JSON.parse(saved);
+            }
+        } catch (e) {
+            console.error('Failed to load printers config:', e);
+        }
+        return [];
     }
 }
 
 // Export singleton instance
-export const printerService = new PrinterService();
+export const printerService = new MultiPrinterService();
+
+// Legacy exports for backward compatibility (deprecated)
+export type PrinterConfig = {
+    espIp: string;
+    espPort: number;
+    autoReconnect: boolean;
+    reconnectInterval: number;
+};
