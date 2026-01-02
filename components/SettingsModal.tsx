@@ -81,6 +81,27 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                 const connected = await blePrinterService.connect(device);
                 if (connected) {
                     blePrinterService.savePairedDevice();
+
+                    // Add BLE printer to printers list if not already exists
+                    const blePrinterId = `ble-${device.id}`;
+                    const exists = printers.some(p => p.id === blePrinterId);
+                    if (!exists) {
+                        const newBlePrinter: PrinterDevice = {
+                            id: blePrinterId,
+                            name: device.name || 'BLE Printer',
+                            type: 'ble',
+                            status: 'online',
+                            bleDeviceId: device.id,
+                            bleDeviceName: device.name || '',
+                            copies: 1,
+                            printTypes: ['receipt'],
+                            isActive: true,
+                            paperWidth: '80mm'
+                        };
+                        const updatedPrinters = [...printers, newBlePrinter];
+                        onUpdatePrinters?.(updatedPrinters);
+                        printerService.savePrintersConfig(updatedPrinters);
+                    }
                 }
             }
         } catch (e) {
@@ -101,6 +122,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         }
         setBlePrinting(false);
     };
+
+
+
 
 
     // Connect to a specific printer
@@ -221,90 +245,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
                     {activeTab === 'hardware' && (
                         <div className="animate-in slide-in-from-right-4 duration-300 space-y-6">
-                            {/* BLE Printer Section */}
-                            <div className={`border rounded-2xl p-6 ${bleStatus.isConnected ? 'bg-emerald-500/5 border-emerald-500/50' : 'bg-blue-500/5 border-blue-500/30'}`}>
-                                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-center sm:text-left">
-                                    <div className="flex items-center gap-4">
-                                        <div className={`p-4 rounded-xl ${bleStatus.isConnected ? 'bg-emerald-500 text-slate-950' : 'bg-blue-500/20 text-blue-400'}`}>
-                                            <Bluetooth size={28} />
-                                        </div>
-                                        <div>
-                                            <h4 className="text-lg font-bold text-white flex items-center gap-2 justify-center sm:justify-start">
-                                                BLE Printer
-                                                {!blePrinterService.isSupported() && (
-                                                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-bold">Not Supported</span>
-                                                )}
-                                            </h4>
-                                            {bleStatus.isConnected ? (
-                                                <p className="text-sm text-emerald-400 font-bold mt-1">✓ Connected: {bleStatus.deviceName}</p>
-                                            ) : (
-                                                <p className="text-sm text-slate-500 mt-1">Pair BLE thermal printer langsung dari browser</p>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* BLE Status & Actions */}
-                                <div className="mt-4 flex flex-wrap gap-2">
-                                    {bleStatus.isConnected ? (
-                                        <>
-                                            <button
-                                                onClick={handleBleTestPrint}
-                                                disabled={blePrinting}
-                                                className="flex-1 sm:flex-none h-10 px-4 bg-emerald-500 text-slate-950 font-bold rounded-lg flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
-                                            >
-                                                {blePrinting ? <><RefreshCw size={14} className="animate-spin" /> Printing...</> : <><FileText size={14} /> Test Print</>}
-                                            </button>
-                                            <button
-                                                onClick={handleBleDisconnect}
-                                                className="h-10 px-4 bg-red-500/10 border border-red-500/30 rounded-lg text-xs font-bold text-red-400 hover:bg-red-500/20 transition-all flex items-center justify-center gap-2"
-                                            >
-                                                <WifiOff size={14} /> Disconnect
-                                            </button>
-                                        </>
+                            {/* Bluetooth Printer Action Area */}
+                            <div className="space-y-4">
+                                <button
+                                    onClick={handleBlePair}
+                                    disabled={blePairing || !blePrinterService.isSupported()}
+                                    className="w-full h-16 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-lg shadow-xl shadow-blue-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {blePairing ? (
+                                        <><RefreshCw size={24} className="animate-spin" /> Scanning Devices...</>
                                     ) : (
-                                        <button
-                                            onClick={handleBlePair}
-                                            disabled={blePairing || !blePrinterService.isSupported()}
-                                            className="w-full sm:w-auto px-6 h-12 rounded-xl font-bold flex items-center justify-center gap-3 transition-all bg-blue-500 text-white shadow-lg shadow-blue-500/20 active:scale-95 disabled:opacity-50"
-                                        >
-                                            {blePairing ? <><RefreshCw size={18} className="animate-spin" /> Scanning...</> : <><Bluetooth size={18} /> Pair BLE Printer</>}
-                                        </button>
+                                        <><Bluetooth size={24} /> Add Bluetooth Printer</>
                                     )}
-                                </div>
-                            </div>
+                                </button>
 
-                            {/* Printer Network Section */}
-                            <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-6">
-                                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-center sm:text-left">
-                                    <div>
-                                        <h4 className="text-lg font-bold text-white flex items-center gap-2 justify-center sm:justify-start">
-                                            <Printer size={20} className="text-primary-500" /> Printer Network
-                                        </h4>
-                                        <p className="text-sm text-slate-500 mt-1">Add ESP32 printers by IP address</p>
+                                {!blePrinterService.isSupported() && (
+                                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-center">
+                                        <p className="text-red-400 font-bold text-sm">Browser ini tidak mendukung Web Bluetooth. Gunakan Chrome di Android/Desktop.</p>
                                     </div>
-                                    <button
-                                        onClick={() => {
-                                            const newPrinter: PrinterDevice = {
-                                                id: `printer-${Date.now()}`,
-                                                name: '',
-                                                ip: '',
-                                                port: 81,
-                                                status: 'offline',
-                                                type: 'esp32',
-                                                copies: 1,
-                                                printTypes: ['receipt'],
-                                                isActive: true,
-                                                paperWidth: '80mm'
-                                            };
-                                            setEditingPrinter(newPrinter);
-                                        }}
-                                        className="w-full sm:w-auto px-6 h-12 rounded-xl font-bold flex items-center justify-center gap-3 transition-all bg-primary-500 text-slate-950 shadow-lg shadow-primary-500/20 active:scale-95"
-                                    >
-                                        <Plus size={18} />
-                                        Add Printer
-                                    </button>
-                                </div>
+                                )}
                             </div>
 
                             {/* Configured Printers */}
@@ -318,9 +277,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                     </div>
                                 )}
                                 {printers.map(device => {
-                                    const status = printerStatuses.get(device.id) || { appConnected: false, printerConnected: false, lastUpdate: 0 };
+                                    // For BLE printers, use bleStatus; for ESP32, use WebSocket status
+                                    const isBle = device.type === 'ble';
+                                    const status = isBle
+                                        ? { appConnected: bleStatus.isConnected, printerConnected: bleStatus.isConnected, lastUpdate: bleStatus.lastUpdate }
+                                        : printerStatuses.get(device.id) || { appConnected: false, printerConnected: false, lastUpdate: 0 };
                                     const isConnecting = connectingPrinters.has(device.id);
-                                    const isPrinting = printingPrinters.has(device.id);
+                                    const isPrinting = isBle ? blePrinting : printingPrinters.has(device.id);
                                     const isActive = device.isActive;
 
                                     return (
@@ -330,14 +293,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                                                     <div className="flex items-center gap-4">
                                                         <div className={`p-3.5 rounded-xl border shrink-0 transition-all ${status.appConnected && status.printerConnected ? 'bg-emerald-500 text-slate-950 border-emerald-400' : status.appConnected ? 'bg-primary-500/20 text-primary-400 border-primary-500/30' : 'bg-slate-900 text-slate-500 border-slate-800'}`}>
-                                                            <Printer size={24} />
+                                                            {isBle ? <Bluetooth size={24} /> : <Printer size={24} />}
                                                         </div>
                                                         <div>
                                                             <div className="flex items-center gap-2">
                                                                 <h5 className={`font-bold text-sm ${isActive ? 'text-white' : 'text-slate-500'}`}>{device.name || 'Unnamed Printer'}</h5>
-                                                                <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tight bg-slate-700 text-slate-300">{device.paperWidth || '80mm'}</span>
+                                                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tight ${isBle ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-700 text-slate-300'}`}>
+                                                                    {isBle ? 'BLE' : device.paperWidth || '80mm'}
+                                                                </span>
                                                             </div>
-                                                            <p className="text-[10px] font-mono text-slate-500 mt-1">{device.ip || 'No IP'}:{device.port || 81}</p>
+                                                            <p className="text-[10px] font-mono text-slate-500 mt-1">
+                                                                {isBle ? `Bluetooth: ${device.bleDeviceName || device.bleDeviceId || 'Paired'}` : `${device.ip || 'No IP'}:${device.port || 81}`}
+                                                            </p>
                                                             {device.printTypes && device.printTypes.length > 0 && (
                                                                 <div className="flex gap-1.5 mt-2">
                                                                     {device.printTypes.map(type => (
@@ -353,49 +320,83 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                                 <div className="mt-4 bg-slate-900/50 rounded-xl p-3 space-y-2">
                                                     <div className="flex items-center justify-between">
                                                         <div className="flex items-center gap-2">
-                                                            {status.appConnected ? <Wifi size={14} className="text-emerald-500" /> : <WifiOff size={14} className="text-slate-500" />}
-                                                            <span className="text-xs font-bold text-slate-400">App ↔ ESP32</span>
+                                                            {isBle ? <Bluetooth size={14} className={status.appConnected ? 'text-emerald-500' : 'text-slate-500'} /> : (status.appConnected ? <Wifi size={14} className="text-emerald-500" /> : <WifiOff size={14} className="text-slate-500" />)}
+                                                            <span className="text-xs font-bold text-slate-400">{isBle ? 'BLE Connection' : 'App ↔ ESP32'}</span>
                                                         </div>
                                                         <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${status.appConnected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
                                                             {status.appConnected ? <><CheckCircle size={10} /> Connected</> : <><XCircle size={10} /> Offline</>}
                                                         </div>
                                                     </div>
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center gap-2">
-                                                            <Printer size={14} className={status.printerConnected ? 'text-emerald-500' : 'text-slate-500'} />
-                                                            <span className="text-xs font-bold text-slate-400">ESP32 ↔ Printer</span>
+                                                    {!isBle && (
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2">
+                                                                <Printer size={14} className={status.printerConnected ? 'text-emerald-500' : 'text-slate-500'} />
+                                                                <span className="text-xs font-bold text-slate-400">ESP32 ↔ Printer</span>
+                                                            </div>
+                                                            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${status.printerConnected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                                                                {status.printerConnected ? <><CheckCircle size={10} /> Ready</> : <><XCircle size={10} /> Not Ready</>}
+                                                            </div>
                                                         </div>
-                                                        <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${status.printerConnected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
-                                                            {status.printerConnected ? <><CheckCircle size={10} /> Ready</> : <><XCircle size={10} /> Not Ready</>}
-                                                        </div>
-                                                    </div>
+                                                    )}
                                                 </div>
 
                                                 {/* Action Buttons */}
                                                 <div className="mt-4 flex flex-wrap gap-2">
-                                                    <button
-                                                        onClick={() => handleConnect(device)}
-                                                        disabled={isConnecting || !device.ip}
-                                                        className={`flex-1 sm:flex-none h-10 px-4 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 ${status.appConnected
-                                                            ? 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20'
-                                                            : 'bg-primary-500 text-slate-950'
-                                                            }`}
-                                                    >
-                                                        {isConnecting ? (
-                                                            <><RefreshCw size={14} className="animate-spin" /> Connecting...</>
-                                                        ) : status.appConnected ? (
-                                                            <><WifiOff size={14} /> Disconnect</>
-                                                        ) : (
-                                                            <><Zap size={14} /> Connect</>
-                                                        )}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleTestPrint(device)}
-                                                        disabled={!status.appConnected || !status.printerConnected || isPrinting}
-                                                        className="flex-1 sm:flex-none h-10 px-4 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-slate-300 hover:bg-slate-800 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
-                                                    >
-                                                        {isPrinting ? <><RefreshCw size={14} className="animate-spin" /> Printing...</> : <><FileText size={14} /> Test Print</>}
-                                                    </button>
+                                                    {isBle ? (
+                                                        // BLE Printer buttons
+                                                        <>
+                                                            {status.appConnected ? (
+                                                                <button
+                                                                    onClick={handleBleDisconnect}
+                                                                    className="flex-1 sm:flex-none h-10 px-4 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20"
+                                                                >
+                                                                    <WifiOff size={14} /> Disconnect
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={handleBlePair}
+                                                                    disabled={blePairing}
+                                                                    className="flex-1 sm:flex-none h-10 px-4 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 bg-blue-500 text-white disabled:opacity-50"
+                                                                >
+                                                                    {blePairing ? <><RefreshCw size={14} className="animate-spin" /> Pairing...</> : <><Bluetooth size={14} /> Reconnect</>}
+                                                                </button>
+                                                            )}
+                                                            <button
+                                                                onClick={handleBleTestPrint}
+                                                                disabled={!status.appConnected || isPrinting}
+                                                                className="flex-1 sm:flex-none h-10 px-4 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-slate-300 hover:bg-slate-800 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                                                            >
+                                                                {isPrinting ? <><RefreshCw size={14} className="animate-spin" /> Printing...</> : <><FileText size={14} /> Test Print</>}
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        // ESP32 Printer buttons
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleConnect(device)}
+                                                                disabled={isConnecting || !device.ip}
+                                                                className={`flex-1 sm:flex-none h-10 px-4 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 ${status.appConnected
+                                                                    ? 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20'
+                                                                    : 'bg-primary-500 text-slate-950'
+                                                                    }`}
+                                                            >
+                                                                {isConnecting ? (
+                                                                    <><RefreshCw size={14} className="animate-spin" /> Connecting...</>
+                                                                ) : status.appConnected ? (
+                                                                    <><WifiOff size={14} /> Disconnect</>
+                                                                ) : (
+                                                                    <><Zap size={14} /> Connect</>
+                                                                )}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleTestPrint(device)}
+                                                                disabled={!status.appConnected || !status.printerConnected || isPrinting}
+                                                                className="flex-1 sm:flex-none h-10 px-4 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-slate-300 hover:bg-slate-800 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+                                                            >
+                                                                {isPrinting ? <><RefreshCw size={14} className="animate-spin" /> Printing...</> : <><FileText size={14} /> Test Print</>}
+                                                            </button>
+                                                        </>
+                                                    )}
                                                     <button
                                                         onClick={() => setEditingPrinter(device)}
                                                         className="h-10 px-4 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-slate-300 hover:bg-slate-800 transition-all flex items-center justify-center gap-2"

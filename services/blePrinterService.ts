@@ -32,7 +32,7 @@ export interface PrintLine {
     align?: 'left' | 'center' | 'right';
     bold?: boolean;
     size?: 'normal' | 'large' | 'small';
-    type?: 'text' | 'separator';
+    type?: 'text' | 'separator' | 'barcode' | 'qr';
 }
 
 export interface PrintJob {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, DollarSign, CreditCard, Smartphone, Printer, CheckCircle2, ArrowRight, Receipt, Share2, Copy } from 'lucide-react';
-import { CartItem } from '../types';
+import { X, DollarSign, CreditCard, Smartphone, Printer, CheckCircle2, ArrowRight, Receipt, Share2, Copy, RefreshCw, Store } from 'lucide-react';
+import { CartItem, PrinterDevice, Outlet } from '../types';
+import { printerService, PrintJob, PrintLine } from '../services/printerService';
 
 interface CheckoutModalProps {
     isOpen: boolean;
@@ -14,6 +15,9 @@ interface CheckoutModalProps {
     globalDiscountName?: string;
     globalDiscountAmount?: number;
     onConfirmPayment: (method: string) => Promise<string | null>;
+    cashierName?: string;
+    printers: PrinterDevice[];
+    outlet?: Outlet;
 }
 
 type PaymentMethod = 'cash' | 'card' | 'qris';
@@ -29,7 +33,10 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
     onComplete,
     globalDiscountName,
     globalDiscountAmount = 0,
-    onConfirmPayment
+    onConfirmPayment,
+    cashierName = 'Cashier',
+    printers,
+    outlet
 }) => {
     const [view, setView] = useState<'payment' | 'success'>('payment');
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
@@ -37,6 +44,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const [isPrinting, setIsPrinting] = useState(true);
     const [orderId, setOrderId] = useState('');
     const [changeDue, setChangeDue] = useState(0);
+    const [isPrintingNow, setIsPrintingNow] = useState(false);
 
     // Reset state on open
     useEffect(() => {
@@ -51,7 +59,10 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
     if (!isOpen) return null;
 
     const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
+        // Use standard space instead of non-breaking space to prevent encoding issues ('Rpa')
+        return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 })
+            .format(amount)
+            .replace(/\u00a0/g, ' ');
     };
 
     const cashAmount = parseInt(cashGiven) || 0;
@@ -62,6 +73,134 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
     const suggestions = [total, Math.ceil(total / 50000) * 50000, Math.ceil(total / 100000) * 100000];
     const uniqueSuggestions = Array.from(new Set(suggestions)).filter(s => s >= total);
 
+    // Build receipt print job for thermal printer
+    const buildReceiptPrintJob = (orderNumber: string): PrintJob => {
+        const lines: PrintLine[] = [];
+        const separator = '--------------------------------'; // 32 chars for 58mm
+
+        // Helper for 2-column layout (32 chars)
+        const formatLayout = (left: string, right: string) => {
+            const width = 32;
+            // Ensure at least 1 space
+            const maxLeft = width - right.length - 1;
+            const safeLeft = left.length > maxLeft ? left.substring(0, maxLeft) : left;
+
+            const spacing = width - safeLeft.length - right.length;
+            const spaces = spacing > 0 ? ' '.repeat(spacing) : ' ';
+            return safeLeft + spaces + right;
+        };
+
+        // Header
+        const storeName = outlet?.name?.toUpperCase() || 'ELEGANTPOS';
+        const receiptSettings = outlet?.receiptSettings || {};
+        // Use 'show_header' from DB json to control address display as per user request mapping
+        const showAddress = receiptSettings.show_header !== false;
+        const address = outlet?.address || 'Jl. Sudirman No. 123, Jakarta';
+
+        lines.push({ text: storeName, align: 'center' });
+
+        if (showAddress && address) {
+            // Split address if too long or just let standard behavior
+            // Since manual formatting is hard without knowing font width, we rely on center align
+            lines.push({ text: address, align: 'center' });
+            lines.push({ text: '0812-3456-7890', align: 'center' }); // Keep phone with address
+        }
+
+        lines.push({ text: separator, align: 'center' });
+        lines.push({ text: '' });
+
+        // Order info
+        lines.push({ text: formatLayout('Tanggal', new Date().toLocaleDateString('id-ID')) });
+        lines.push({ text: formatLayout('Waktu', new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB') });
+
+        // Handle potentially long order number
+        const shortOrder = orderNumber.length > 15 ? orderNumber.substring(0, 15) + '...' : orderNumber;
+        lines.push({ text: formatLayout('No. Transaksi', shortOrder) });
+        lines.push({ text: formatLayout('Kasir', cashierName) });
+        lines.push({ text: separator, align: 'center' });
+
+        // Items
+        cartItems.forEach(item => {
+            lines.push({ text: item.name });
+            const priceStr = ` ${item.quantity} x ${formatCurrency(item.price)}`;
+            const totalStr = formatCurrency(item.price * item.quantity);
+            lines.push({ text: formatLayout(priceStr, totalStr) });
+
+            // Options
+            item.selectedOptions?.forEach(opt => {
+                if (opt.price > 0) {
+                    const optName = ` + ${opt.name}`;
+                    const optPrice = formatCurrency(opt.price * item.quantity);
+                    lines.push({ text: formatLayout(optName, optPrice), size: 'small' });
+                }
+            });
+
+            // Item discount
+            if (item.discount && item.discount > 0) {
+                lines.push({ text: formatLayout('  Disc', `-${formatCurrency(item.discount * item.quantity)}`), size: 'small' });
+            }
+        });
+
+        lines.push({ text: separator, align: 'center' });
+
+        // Totals
+        lines.push({ text: formatLayout('Subtotal', formatCurrency(subtotal)) });
+        if (totalItemDiscounts > 0) {
+            lines.push({ text: formatLayout('Diskon', `-${formatCurrency(totalItemDiscounts)}`) });
+        }
+        if (globalDiscountAmount > 0) {
+            lines.push({ text: formatLayout(globalDiscountName || 'Discount', `-${formatCurrency(globalDiscountAmount)}`) });
+        }
+        lines.push({ text: formatLayout('Pajak (11%)', formatCurrency(tax)) });
+        lines.push({ text: separator, align: 'center' });
+
+        // Final Total
+        // Whole line bold for emphasis
+        lines.push({ text: formatLayout('Total Bayar', formatCurrency(total)), bold: true, size: 'normal' });
+        lines.push({ text: formatLayout('Metode', paymentMethod.toUpperCase()) });
+
+        lines.push({ text: separator, align: 'center' });
+
+        // Footer
+        if (receiptSettings.show_footer !== false) {
+            lines.push({ text: '' }); // Spacing before footer
+            const footerText = receiptSettings.footer_text || 'Terima kasih telah berbelanja.\nBarang yang sudah dibeli\ntidak dapat ditukar.';
+            const footerLines = footerText.split('\n');
+            footerLines.forEach((line: string) => {
+                if (line.trim()) lines.push({ text: line.trim(), align: 'center' });
+            });
+        }
+
+        // lines.push({ text: '' }); // Single final feed line
+
+        return { lines, cut: true };
+    };
+
+    // Print receipt function
+    const printReceipt = async (orderNumber: string) => {
+        if (printers.length === 0) {
+            console.log('[Print] No printers configured');
+            return;
+        }
+
+        setIsPrintingNow(true);
+        const job = buildReceiptPrintJob(orderNumber);
+
+        try {
+            const results = await printerService.printByType('receipt', job, printers);
+            console.log('[Print] Results:', results);
+
+            const success = results.some(r => r.success);
+            if (!success && results.length > 0) {
+                console.warn('[Print] All printers failed:', results);
+            }
+        } catch (e) {
+            console.error('[Print] Error:', e);
+        }
+
+        setIsPrintingNow(false);
+    };
+
     const handleProcessPayment = async () => {
         // Call parent to create order in DB
         const newOrderId = await onConfirmPayment(paymentMethod);
@@ -70,9 +209,9 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
             setOrderId(newOrderId);
             setChangeDue(change);
 
-            // If printing enabled, you would trigger print job here
+            // Print receipt if enabled
             if (isPrinting) {
-                console.log("Printing Receipt for Order:", newOrderId);
+                await printReceipt(newOrderId);
             }
 
             setView('success');
@@ -211,133 +350,144 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 {/* VIEW: SUCCESS */}
                 {view === 'success' && (
                     <>
-                        <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center min-h-0">
+                        <div className="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col items-center min-h-0">
 
                             {/* Success Header */}
                             <div className="text-center space-y-2 mb-6 animate-in zoom-in duration-300">
-                                <div className="w-16 h-16 bg-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/30 mb-4">
-                                    <CheckCircle2 size={32} className="text-white" strokeWidth={3} />
+                                <div className="w-14 h-14 bg-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/30 mb-3">
+                                    <CheckCircle2 size={28} className="text-white" strokeWidth={3} />
                                 </div>
-                                <h3 className="text-2xl font-bold text-white">Payment Successful!</h3>
-                                <div className="flex items-center justify-center gap-2 text-slate-400">
-                                    <span>Order ID:</span>
-                                    <span className="font-mono text-white bg-slate-800 px-2 py-0.5 rounded border border-slate-700 select-all">{orderId}</span>
-                                </div>
-                                {changeDue > 0 && (
-                                    <div className="inline-block bg-slate-800/50 rounded-lg px-4 py-2 mt-2 border border-slate-700">
-                                        <span className="text-sm text-slate-400 block text-xs uppercase font-bold">Change Due</span>
-                                        <span className="text-xl font-bold text-emerald-400">{formatCurrency(changeDue)}</span>
-                                    </div>
-                                )}
+                                <h3 className="text-xl font-bold text-white">Payment Successful!</h3>
                             </div>
 
-                            {/* Thermal Receipt Preview */}
-                            <div className="w-full max-w-xs bg-white text-slate-900 p-4 font-mono text-xs shadow-xl leading-tight opacity-90 rounded-sm mb-4 relative">
-                                {/* Paper Jagged Edge Top */}
-                                <div className="text-center mb-3 border-b-2 border-dashed border-slate-300 pb-3">
-                                    <h2 className="font-bold text-lg uppercase mb-1">ElegantPOS</h2>
-                                    <p>Jl. Sudirman No. 123</p>
-                                    <p>Jakarta, Indonesia</p>
-                                    <p className="mt-1">0812-3456-7890</p>
-                                </div>
+                            {/* Digital Receipt Review (Styled like Mockup) */}
+                            <div className="w-full max-w-[320px] bg-white rounded-lg shadow-xl overflow-hidden mb-6 relative antialiased">
+                                {/* Top Edge Decoration (CSS only simulation) */}
+                                <div className="h-1 bg-primary-500"></div>
 
-                                <div className="mb-3 flex justify-between">
-                                    <span>{new Date().toLocaleDateString()}</span>
-                                    <span>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                </div>
-                                <div className="mb-3">
-                                    <p>Order: {orderId}</p>
-                                    <p>Cashier: Sarah J.</p>
-                                </div>
+                                <div className="p-5 pb-4">
+                                    {/* Store Header */}
+                                    <div className="flex flex-col items-center text-center">
+                                        <div className="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mb-3 text-red-500">
+                                            <Store size={24} />
+                                        </div>
+                                        <h2 className="text-slate-900 text-lg font-bold leading-tight">{outlet?.name || 'ELEGANTPOS'}</h2>
+                                        {(outlet?.receiptSettings?.show_header !== false) && (
+                                            <>
+                                                <p className="text-slate-500 text-xs mt-1 max-w-[180px]">{outlet?.address || 'Jl. Jendral Sudirman No. 10, Jakarta Pusat, 10220'}</p>
+                                            </>
+                                        )}
+                                    </div>
 
-                                {/* Items List */}
-                                <div className="border-b-2 border-dashed border-slate-300 pb-2 mb-2">
-                                    {cartItems.map((item, idx) => {
-                                        const itemTotal = item.price * item.quantity;
-                                        const itemDiscountTotal = (item.discount || 0) * item.quantity;
+                                    <div className="my-4 border-t-2 border-dashed border-slate-200"></div>
 
-                                        return (
-                                            <div key={idx} className="mb-2">
-                                                {/* Main Item Line */}
-                                                <div className="flex justify-between font-bold">
-                                                    <span>{item.name}</span>
+                                    {/* Info Grid */}
+                                    <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs">
+                                        <div className="text-slate-500">Tanggal</div>
+                                        <div className="text-slate-900 text-right font-medium">{new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+
+                                        <div className="text-slate-500">Waktu</div>
+                                        <div className="text-slate-900 text-right font-medium">{new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB</div>
+
+                                        <div className="text-slate-500">No. Transaksi</div>
+                                        <div className="text-slate-900 text-right font-medium font-mono">#{orderId.slice(0, 8)}</div>
+
+                                        <div className="text-slate-500">Kasir</div>
+                                        <div className="text-slate-900 text-right font-medium">{cashierName}</div>
+                                    </div>
+
+                                    <div className="my-4 border-t-2 border-dashed border-slate-200"></div>
+
+                                    {/* Items List */}
+                                    <div className="space-y-3">
+                                        {cartItems.map((item, idx) => (
+                                            <div key={idx} className="flex justify-between items-start gap-4">
+                                                <div className="flex-1">
+                                                    <p className="text-slate-900 text-sm font-medium leading-tight mb-0.5">{item.name}</p>
+                                                    {/* Options or Variant text could go here */}
+                                                    {item.selectedOptions?.map((opt, i) => (
+                                                        <p key={i} className="text-slate-500 text-[10px] italic"> + {opt.name}</p>
+                                                    ))}
+                                                    <p className="text-slate-500 text-xs pl-2">{item.quantity} x {formatCurrency(item.price).replace(/\u00a0/g, ' ')}</p>
                                                 </div>
-
-                                                {/* Qty x Price */}
-                                                <div className="flex justify-between text-slate-600">
-                                                    <span>{item.quantity} x {formatCurrency(item.price)}</span>
-                                                    <span>{formatCurrency(itemTotal)}</span>
+                                                <div className="shrink-0">
+                                                    <p className="text-slate-900 text-sm font-semibold">{formatCurrency(item.price * item.quantity).replace(/\u00a0/g, ' ')}</p>
                                                 </div>
-
-                                                {/* Options */}
-                                                {item.selectedOptions?.map((opt, i) => (
-                                                    <div key={i} className="flex justify-between text-[10px] text-slate-500 pl-2">
-                                                        <span>+ {opt.name}</span>
-                                                        {opt.price > 0 && <span>{formatCurrency(opt.price * item.quantity)}</span>}
-                                                    </div>
-                                                ))}
-
-                                                {/* Item Discount Line */}
-                                                {item.discount && item.discount > 0 && (
-                                                    <div className="flex justify-between text-[10px] text-slate-500 pl-2 italic">
-                                                        <span>Disc. (Per Item)</span>
-                                                        <span>-{formatCurrency(itemDiscountTotal)}</span>
-                                                    </div>
-                                                )}
                                             </div>
-                                        );
-                                    })}
-                                </div>
-
-                                {/* Footer Totals */}
-                                <div className="space-y-1 mb-3">
-                                    <div className="flex justify-between">
-                                        <span>Subtotal</span>
-                                        <span>{formatCurrency(subtotal)}</span>
+                                        ))}
                                     </div>
 
-                                    {/* Item Discounts Summary */}
-                                    {totalItemDiscounts > 0 && (
-                                        <div className="flex justify-between text-slate-600 italic">
-                                            <span>Item Discounts</span>
-                                            <span>-{formatCurrency(totalItemDiscounts)}</span>
+                                    <div className="my-4 border-t-2 border-dashed border-slate-200"></div>
+
+                                    {/* Summary */}
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Subtotal</span>
+                                            <span className="text-slate-900 font-medium">{formatCurrency(subtotal)}</span>
                                         </div>
-                                    )}
-
-                                    {/* Global / Order Discount */}
-                                    {globalDiscountAmount > 0 && (
-                                        <div className="flex justify-between text-slate-600 italic">
-                                            <span>{globalDiscountName || 'Order Discount'}</span>
-                                            <span>-{formatCurrency(globalDiscountAmount)}</span>
+                                        {totalItemDiscounts > 0 && (
+                                            <div className="flex justify-between">
+                                                <span className="text-slate-500">Item Disc</span>
+                                                <span className="text-red-500 font-medium">-{formatCurrency(totalItemDiscounts)}</span>
+                                            </div>
+                                        )}
+                                        {globalDiscountAmount > 0 && (
+                                            <div className="flex justify-between">
+                                                <span className="text-red-500">{globalDiscountName || 'Discount'}</span>
+                                                <span className="text-red-500 font-medium">-{formatCurrency(globalDiscountAmount)}</span>
+                                            </div>
+                                        )}
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Pajak (11%)</span>
+                                            <span className="text-slate-900 font-medium">{formatCurrency(tax)}</span>
                                         </div>
-                                    )}
 
-                                    <div className="flex justify-between">
-                                        <span>Tax (11%)</span>
-                                        <span>{formatCurrency(tax)}</span>
-                                    </div>
+                                        <div className="h-px bg-slate-100 my-2"></div>
 
-                                    <div className="flex justify-between font-bold text-sm border-t border-dashed border-slate-300 pt-1 mt-1">
-                                        <span>TOTAL</span>
-                                        <span>{formatCurrency(total)}</span>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-slate-900 text-lg font-bold">Total Bayar</span>
+                                            <span className="text-slate-900 text-xl font-bold">{formatCurrency(total)}</span>
+                                        </div>
+
+                                        <div className="flex justify-between text-xs mt-2 pt-2 border-t border-slate-100">
+                                            <span className="text-slate-500">Metode Pembayaran</span>
+                                            <span className="text-slate-900 font-bold uppercase">{paymentMethod}</span>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div className="text-center pt-2 border-t-2 border-dashed border-slate-300">
-                                    <p>Thank you for visiting!</p>
-                                    <p className="mt-1 text-[10px]">Follow us @elegantpos</p>
-                                </div>
+                                {
+                                    (outlet?.receiptSettings?.show_footer !== false) && (
+                                        <div className="bg-slate-50 p-4 text-center border-t border-slate-100">
+                                            <p className="text-[10px] text-slate-400 italic leading-relaxed whitespace-pre-wrap">
+                                                {outlet?.receiptSettings?.footer_text || "Terima kasih telah berbelanja.\nBarang yang sudah dibeli tidak dapat ditukar."}
+                                            </p>
+                                        </div>
+                                    )
+                                }
 
-                                {/* Paper Jagged Edge Bottom (Visual) */}
-                                <div className="absolute -bottom-2 left-0 w-full h-4 bg-slate-900" style={{ clipPath: 'polygon(0% 0%, 5% 100%, 10% 0%, 15% 100%, 20% 0%, 25% 100%, 30% 0%, 35% 100%, 40% 0%, 45% 100%, 50% 0%, 55% 100%, 60% 0%, 65% 100%, 70% 0%, 75% 100%, 80% 0%, 85% 100%, 90% 0%, 95% 100%, 100% 0%)' }}></div>
+                                {/* Jagged Edge Bottom */}
+                                <div className="h-3 w-full bg-slate-900 absolute bottom-0" style={{
+                                    maskImage: 'radial-gradient(circle at 10px 0, transparent 0, transparent 10px, black 11px)',
+                                    maskSize: '20px 20px',
+                                    maskRepeat: 'repeat-x',
+                                    WebkitMaskImage: 'radial-gradient(circle at 10px 0, transparent 0, transparent 10px, black 11px)',
+                                    WebkitMaskSize: '20px 20px',
+                                    WebkitMaskRepeat: 'repeat-x',
+                                    bottom: '-10px'
+                                }}></div>
                             </div>
+
                         </div>
 
                         {/* Success Footer Actions */}
                         <div className="p-5 border-t border-slate-800 bg-slate-900 flex gap-3 shrink-0">
-                            <button className="flex-1 h-12 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors border border-slate-700">
-                                <Printer size={18} />
-                                <span>Re-Print</span>
+                            <button
+                                onClick={() => printReceipt(orderId)}
+                                disabled={isPrintingNow}
+                                className="flex-1 h-12 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors border border-slate-700 disabled:opacity-50"
+                            >
+                                {isPrintingNow ? <><RefreshCw size={18} className="animate-spin" /> Printing...</> : <><Printer size={18} /> Re-Print</>}
                             </button>
 
                             <button

@@ -52,10 +52,12 @@ function App() {
     const savedSession = localStorage.getItem(STORAGE_KEYS.SESSION);
     const savedHardware = localStorage.getItem(STORAGE_KEYS.HARDWARE);
 
+    let restoredUser = null;
+
     if (savedUser) {
       try {
-        const user = JSON.parse(savedUser);
-        setCurrentUser(user);
+        restoredUser = JSON.parse(savedUser);
+        setCurrentUser(restoredUser);
         setIsAuthenticated(true);
       } catch (e) {
         console.error('Failed to restore user session', e);
@@ -66,7 +68,20 @@ function App() {
       try {
         const session = JSON.parse(savedSession);
         if (session.outletId) {
+          // Set initial partial data from storage to avoid flicker
           setSelectedOutlet({ id: session.outletId, name: session.outletName });
+
+          // Immediately fetch full outlet configuration (receipt settings, etc) from DB
+          if (restoredUser?.storeId) {
+            supaDataService.getOutlets(restoredUser.storeId).then(outlets => {
+              const active = outlets.find(o => o.id === session.outletId);
+              if (active) {
+                console.log('Restored full outlet config:', active);
+                setSelectedOutlet(active);
+              }
+            });
+          }
+
           setRegisterId(session.registerId);
           if (session.businessType) {
             setBusinessType(session.businessType);
@@ -588,7 +603,7 @@ function App() {
       <ShiftModal isOpen={isShiftModalOpen} onClose={() => setIsShiftModalOpen(false)} shiftData={shiftData} onConfirmShift={handleShiftUpdate} outletId={selectedOutlet?.id} />
       <VariantModal isOpen={isVariantModalOpen} onClose={() => setIsVariantModalOpen(false)} product={selectedProductForVariant} onAddToCart={addToCart} />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} businessType={businessType} onChangeBusinessType={handleChangeBusinessType} categoryGroups={categoryGroups} onUpdateCategoryGroups={setCategoryGroups} discounts={discounts} onUpdateDiscounts={setDiscounts} printers={printers} onUpdatePrinters={setPrinters} />
-      <CheckoutModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} total={finalTotal} subtotal={subtotal} tax={tax} discount={totalDiscount} cartItems={cartItems} onComplete={handleTransactionComplete} globalDiscountName={globalDiscount.name} globalDiscountAmount={globalDiscountAmount} onConfirmPayment={handleConfirmPayment} />
+      <CheckoutModal isOpen={isCheckoutOpen} onClose={() => setIsCheckoutOpen(false)} total={finalTotal} subtotal={subtotal} tax={tax} discount={totalDiscount} cartItems={cartItems} onComplete={handleTransactionComplete} globalDiscountName={globalDiscount.name} globalDiscountAmount={globalDiscountAmount} onConfirmPayment={handleConfirmPayment} cashierName={shiftData.cashierName} printers={printers} outlet={selectedOutlet} />
 
       <KitchenPreviewModal
         isOpen={isKitchenPreviewOpen}

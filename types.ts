@@ -9,6 +9,7 @@ export interface Outlet {
   isOpen: boolean;
   type: string;
   storeId?: string; // Optional reference
+  receiptSettings?: any;
 }
 
 export interface ProductOption {

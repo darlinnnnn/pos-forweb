@@ -38,7 +38,8 @@ export const supaDataService = {
             address: o.address || '',
             isOpen: o.is_open || false,
             type: 'Store',
-            storeId: o.store_id
+            storeId: o.store_id,
+            receiptSettings: o.receipt_settings
         }));
     },
 

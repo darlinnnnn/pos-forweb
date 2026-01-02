@@ -1,6 +1,7 @@
 // Printer Service - Multi-printer WebSocket communication with ESP32 bridges
 
 import { PrinterDevice } from '../types';
+import { blePrinterService } from './blePrinterService';
 
 export interface PrinterStatus {
     appConnected: boolean;      // Web app connected to ESP32
@@ -339,6 +340,26 @@ class MultiPrinterService {
         );
 
         for (const printer of targetPrinters) {
+            // Handle BLE printers
+            if (printer.type === 'ble') {
+                const bleStatus = blePrinterService.getStatus();
+                if (bleStatus.isConnected) {
+                    const copies = printer.copies || 1;
+                    for (let i = 0; i < copies; i++) {
+                        const result = await blePrinterService.print(job);
+                        results.push({ printerId: printer.id, ...result });
+                    }
+                } else {
+                    results.push({
+                        printerId: printer.id,
+                        success: false,
+                        error: 'BLE printer not connected'
+                    });
+                }
+                continue;
+            }
+
+            // Handle ESP32/WebSocket printers
             const status = this.getStatus(printer.id);
             if (status.appConnected && status.printerConnected) {
                 // Print multiple copies if configured
