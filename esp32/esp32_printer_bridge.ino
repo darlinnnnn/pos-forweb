@@ -71,10 +71,27 @@ String printerAddress = "";
 unsigned long wifiStartTime = 0;
 bool wifiConnecting = false;
 
+// Bluetooth PIN for pairing
+String btPinCode = "0000";
+
 // ESC/POS Commands
 const uint8_t ESC = 0x1B;
 const uint8_t GS = 0x1D;
 const uint8_t LF = 0x0A;
+
+// SSP Callback for PIN authentication
+void BTConfirmRequestCallback(uint32_t numVal) {
+    Serial.printf("[BT] Confirm request for %d - auto confirming\n", numVal);
+    SerialBT.confirmReply(true);
+}
+
+void BTAuthCompleteCallback(boolean success) {
+    if (success) {
+        Serial.println("[BT] Pairing successful!");
+    } else {
+        Serial.println("[BT] Pairing failed!");
+    }
+}
 
 // ==================== HTML PAGES ====================
 
@@ -127,8 +144,6 @@ label{font-size:0.8rem;color:#94a3b8;display:block;margin-bottom:4px}
 <div class="t">🔵 Bluetooth</div>
 <button class="btn s" id="scn" onclick="scan()">🔍 Scan Printers</button>
 <div id="devs"></div>
-<label>PIN (biasanya 0000 atau 1234)</label>
-<input id="pin" type="text" value="0000" maxlength="6" placeholder="PIN">
 <button class="btn p" id="conn" onclick="conn()" disabled>Connect</button>
 </div>
 
@@ -194,9 +209,8 @@ document.getElementById('conn').disabled=false;
 function conn(){
 if(!sel)return;
 var b=document.getElementById('conn');
-var pin=document.getElementById('pin').value||'0000';
 b.disabled=true;b.innerHTML='<span class="ld"></span> Connecting...';
-fetch('/bt/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address:sel.address,name:sel.name,pin:pin})})
+fetch('/bt/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address:sel.address,name:sel.name})})
 .then(r=>r.json()).then(d=>{
 b.disabled=false;b.innerHTML='Connect';
 if(d.success){msg('Connected!','ok');load();}
@@ -485,12 +499,8 @@ void handleBluetoothConnect() {
 
     const char* address = doc["address"] | "";
     const char* name = doc["name"] | "Printer";
-    const char* pin = doc["pin"] | "0000";
 
-    Serial.printf("[BT] Connecting to %s (%s) with PIN %s\n", name, address, pin);
-
-    // Set PIN before connecting
-    SerialBT.setPin(pin);
+    Serial.printf("[BT] Connecting to %s (%s)...\n", name, address);
 
     // Disconnect if already connected
     if (SerialBT.connected()) {
@@ -504,11 +514,10 @@ void handleBluetoothConnect() {
         printerName = String(name);
         printerAddress = String(address);
 
-        // Save to preferences (including PIN)
+        // Save to preferences
         preferences.begin("bt", false);
         preferences.putString("addr", printerAddress);
         preferences.putString("name", printerName);
-        preferences.putString("pin", pin);
         preferences.end();
 
         Serial.println("[BT] Connected!");
@@ -651,14 +660,10 @@ void connectSavedPrinter() {
     preferences.begin("bt", true);
     String addr = preferences.getString("addr", "");
     String name = preferences.getString("name", "");
-    String pin = preferences.getString("pin", "0000");
     preferences.end();
 
     if (addr.length() > 0) {
-        Serial.printf("[BT] Reconnecting to: %s with PIN %s\n", name.c_str(), pin.c_str());
-        
-        // Set PIN before connecting
-        SerialBT.setPin(pin.c_str());
+        Serial.printf("[BT] Reconnecting to: %s\n", name.c_str());
         
         if (SerialBT.connect(addr.c_str())) {
             printerConnected = true;
@@ -675,12 +680,15 @@ void setup() {
     Serial.begin(115200);
     Serial.println("\n\n=== ESP32 POS Printer Bridge ===\n");
 
-    // Initialize Bluetooth with PIN
+    // Initialize Bluetooth with SSP callbacks
     if (!SerialBT.begin("POS-Printer", true)) {  // true = master mode
         Serial.println("[BT] Failed to initialize!");
     } else {
-        SerialBT.setPin("0000");  // Set PIN for pairing
-        Serial.println("[BT] Initialized with PIN 0000");
+        // Register callback for PIN confirmation
+        SerialBT.enableSSP();
+        SerialBT.onConfirmRequest(BTConfirmRequestCallback);
+        SerialBT.onAuthComplete(BTAuthCompleteCallback);
+        Serial.println("[BT] Initialized with SSP");
     }
 
     // Try to connect to saved WiFi

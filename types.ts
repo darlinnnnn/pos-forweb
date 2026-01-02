@@ -121,10 +121,12 @@ export interface DiscountState {
 export interface PrinterDevice {
   id: string;
   name: string;
-  ip: string;
-  port?: number; // WebSocket port (default: 81)
+  ip?: string;             // Optional for BLE printers
+  port?: number;           // WebSocket port (default: 81)
   status: 'online' | 'offline';
-  type: 'esp32' | 'network';
+  type: 'esp32' | 'network' | 'ble';  // Added BLE type
+  bleDeviceId?: string;    // Web Bluetooth device ID
+  bleDeviceName?: string;  // Web Bluetooth device name
   copies?: number;
   printTypes?: ('receipt' | 'kitchen' | 'order')[];
   isActive?: boolean;

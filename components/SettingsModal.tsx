@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Utensils, ShoppingBag, Check, Printer, Wifi, WifiOff, RefreshCw, Smartphone, Menu, Edit2, Save, Tag, Trash2, Plus, ChevronLeft, Ruler, FileText, CheckCircle, XCircle, Sliders, Copy, Zap } from 'lucide-react';
+import { X, Utensils, ShoppingBag, Check, Printer, Wifi, WifiOff, RefreshCw, Smartphone, Menu, Edit2, Save, Tag, Trash2, Plus, ChevronLeft, Ruler, FileText, CheckCircle, XCircle, Sliders, Copy, Zap, Bluetooth } from 'lucide-react';
 import { BusinessType, PrinterDevice, CategoryGroup, DiscountRule } from '../types';
 import { printerService, PrinterStatus } from '../services/printerService';
+import { blePrinterService, BLEPrinterStatus } from '../services/blePrinterService';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -36,6 +37,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     const [connectingPrinters, setConnectingPrinters] = useState<Set<string>>(new Set());
     const [printingPrinters, setPrintingPrinters] = useState<Set<string>>(new Set());
 
+    // BLE Printer state
+    const [bleStatus, setBleStatus] = useState<BLEPrinterStatus>(blePrinterService.getStatus());
+    const [blePairing, setBlePairing] = useState(false);
+    const [blePrinting, setBlePrinting] = useState(false);
+
     // Subscribe to printer status changes
     useEffect(() => {
         const unsubscribe = printerService.onStatusChange((printerId, status) => {
@@ -46,13 +52,56 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
             });
         });
 
+        // Subscribe to BLE status changes
+        const unsubscribeBle = blePrinterService.onStatusChange((status) => {
+            setBleStatus(status);
+        });
+
         // Auto-connect to all configured printers on mount
         if (printers.length > 0) {
             printerService.connectAll(printers);
         }
 
-        return () => unsubscribe();
+        return () => {
+            unsubscribe();
+            unsubscribeBle();
+        };
     }, []);
+
+    // BLE Printer handlers
+    const handleBlePair = async () => {
+        if (!blePrinterService.isSupported()) {
+            alert('Web Bluetooth tidak didukung di browser ini. Gunakan Chrome atau Edge.');
+            return;
+        }
+        setBlePairing(true);
+        try {
+            const device = await blePrinterService.requestDevice();
+            if (device) {
+                const connected = await blePrinterService.connect(device);
+                if (connected) {
+                    blePrinterService.savePairedDevice();
+                }
+            }
+        } catch (e) {
+            console.error('BLE pairing failed:', e);
+        }
+        setBlePairing(false);
+    };
+
+    const handleBleDisconnect = () => {
+        blePrinterService.disconnect();
+    };
+
+    const handleBleTestPrint = async () => {
+        setBlePrinting(true);
+        const result = await blePrinterService.printTest();
+        if (!result.success) {
+            alert('Print failed: ' + (result.error || 'Unknown error'));
+        }
+        setBlePrinting(false);
+    };
+
 
     // Connect to a specific printer
     const handleConnect = async (printer: PrinterDevice) => {
@@ -172,6 +221,59 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
                     {activeTab === 'hardware' && (
                         <div className="animate-in slide-in-from-right-4 duration-300 space-y-6">
+                            {/* BLE Printer Section */}
+                            <div className={`border rounded-2xl p-6 ${bleStatus.isConnected ? 'bg-emerald-500/5 border-emerald-500/50' : 'bg-blue-500/5 border-blue-500/30'}`}>
+                                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-center sm:text-left">
+                                    <div className="flex items-center gap-4">
+                                        <div className={`p-4 rounded-xl ${bleStatus.isConnected ? 'bg-emerald-500 text-slate-950' : 'bg-blue-500/20 text-blue-400'}`}>
+                                            <Bluetooth size={28} />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-lg font-bold text-white flex items-center gap-2 justify-center sm:justify-start">
+                                                BLE Printer
+                                                {!blePrinterService.isSupported() && (
+                                                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-bold">Not Supported</span>
+                                                )}
+                                            </h4>
+                                            {bleStatus.isConnected ? (
+                                                <p className="text-sm text-emerald-400 font-bold mt-1">✓ Connected: {bleStatus.deviceName}</p>
+                                            ) : (
+                                                <p className="text-sm text-slate-500 mt-1">Pair BLE thermal printer langsung dari browser</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* BLE Status & Actions */}
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                    {bleStatus.isConnected ? (
+                                        <>
+                                            <button
+                                                onClick={handleBleTestPrint}
+                                                disabled={blePrinting}
+                                                className="flex-1 sm:flex-none h-10 px-4 bg-emerald-500 text-slate-950 font-bold rounded-lg flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+                                            >
+                                                {blePrinting ? <><RefreshCw size={14} className="animate-spin" /> Printing...</> : <><FileText size={14} /> Test Print</>}
+                                            </button>
+                                            <button
+                                                onClick={handleBleDisconnect}
+                                                className="h-10 px-4 bg-red-500/10 border border-red-500/30 rounded-lg text-xs font-bold text-red-400 hover:bg-red-500/20 transition-all flex items-center justify-center gap-2"
+                                            >
+                                                <WifiOff size={14} /> Disconnect
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <button
+                                            onClick={handleBlePair}
+                                            disabled={blePairing || !blePrinterService.isSupported()}
+                                            className="w-full sm:w-auto px-6 h-12 rounded-xl font-bold flex items-center justify-center gap-3 transition-all bg-blue-500 text-white shadow-lg shadow-blue-500/20 active:scale-95 disabled:opacity-50"
+                                        >
+                                            {blePairing ? <><RefreshCw size={18} className="animate-spin" /> Scanning...</> : <><Bluetooth size={18} /> Pair BLE Printer</>}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
                             {/* Printer Network Section */}
                             <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-6">
                                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4 text-center sm:text-left">
@@ -275,8 +377,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                                                         onClick={() => handleConnect(device)}
                                                         disabled={isConnecting || !device.ip}
                                                         className={`flex-1 sm:flex-none h-10 px-4 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 ${status.appConnected
-                                                                ? 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20'
-                                                                : 'bg-primary-500 text-slate-950'
+                                                            ? 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20'
+                                                            : 'bg-primary-500 text-slate-950'
                                                             }`}
                                                     >
                                                         {isConnecting ? (
